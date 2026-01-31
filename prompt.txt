@@ -1,0 +1,8 @@
+现在基于方案和open-im-server的代码来帮我实现这个简单的im系统，有以下几点要求：
+1. log库使用https://github.com/mbeoliero/kit/log
+2. gorm使用泛型：https://gorm.io/docs/the_generics_way.html
+
+
+这个项目是基于open-im-server（https://github.com/openimsdk/open-im-server 代码： ）实现的简单im系统，现在请你对比两个代码仓库的各个接口实现，对比核心逻辑差异，检查是否存在逻辑漏洞，给出修复意见，输出到项目文件中
+
+这个项目是基于open-im-server（https://github.com/openimsdk/open-im-server 代码： ）实现的简单im系统，现在我需要进行测试，应该怎么测？

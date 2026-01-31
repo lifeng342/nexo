@@ -1,0 +1,38 @@
+server:
+  http_port: 8080
+  ws_port: 8080
+  mode: debug  # debug, release
+  # Allowed origins for WebSocket CORS validation
+  # Use "*" only in development, specify exact origins in production
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+mysql:
+  host: localhost
+  port: 3306
+  user: root
+  password: ""
+  database: nexo_im
+  charset: utf8mb4
+  max_open_conns: 100
+  max_idle_conns: 10
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+  key_prefix: "nexo:"  # Redis key prefix to avoid conflicts with other systems
+
+jwt:
+  secret: "nexo-im-secret-key-change-in-production"
+  expire_hours: 168  # 7 days
+
+websocket:
+  max_conn_num: 10000
+  max_message_size: 51200
+  write_wait: 10s
+  pong_wait: 30s
+  ping_period: 27s
+  push_channel_size: 10000

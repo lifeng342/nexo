@@ -1,0 +1,84 @@
+type User struct {
+	Id        string
+	Nickname  string
+	Avatar    string
+	Extra     string // json str
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+type Group struct {
+	Id            string
+	Name          string
+	Introduction  string
+	Avatar        string
+	Extra         string // json str
+	Status        int32
+	CreatorUserId string
+	GroupType     int32
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
+type GroupMember struct {
+	GroupId       string
+	UserId        string
+	GroupNickname string
+	GroupAvatar   string
+	Extra         string
+	RoleLevel     int32
+	JoinedAt      int64
+	InviterUserId string
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
+type Conversation struct {
+	ConversationId   string
+	OwnerId          string // owner user id
+	ConversationType int32
+	PeerUserId       string
+	GroupId          string
+	RecvMsgOpt       int32
+	IsPinned         bool
+	Extra            string
+	CreatedAt        int64
+	UpdatedAt        int64
+}
+
+type SeqConversation struct {
+	ConversationId string
+	MaxSeq         int64
+	MinSeq         int64
+}
+
+type SeqUser struct {
+	UserId         string
+	ConversationId string
+	MinSeq         int64
+	MaxSeq         int64
+	ReadSeq        int64
+}
+
+type MessageContent struct {
+	Text   string
+	Image  string // only one image
+	Video  string
+	Audio  string
+	File   string
+	Custom string // json str
+}
+
+type Message struct {
+	Id          int64
+	SenderId    string
+	RecvId      string
+	GroupId     string
+	SessionType int32
+	MsgType     int32
+	Content     MessageContent
+	Extra       string
+	SendAt      int64
+	CreatedAt   int64
+	UpdatedAt   int64
+}
