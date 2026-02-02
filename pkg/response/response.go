@@ -2,25 +2,27 @@ package response
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/cloudwego/hertz/pkg/app"
+
 	"github.com/mbeoliero/nexo/pkg/errcode"
 )
 
 // Response represents a standard API response
 type Response struct {
-	Code int         `json:"code"`
-	Msg  string      `json:"msg"`
-	Data interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // Success sends a success response
-func Success(ctx context.Context, c *app.RequestContext, data interface{}) {
+func Success(ctx context.Context, c *app.RequestContext, data any) {
 	c.JSON(http.StatusOK, Response{
-		Code: 0,
-		Msg:  "success",
-		Data: data,
+		Code:    0,
+		Message: "success",
+		Data:    data,
 	})
 }
 
@@ -29,25 +31,23 @@ func Error(ctx context.Context, c *app.RequestContext, err error) {
 	var code int
 	var msg string
 
-	if e, ok := err.(*errcode.Error); ok {
+	var e *errcode.Error
+	if errors.As(err, &e) {
 		code = e.Code
 		msg = e.Msg
-	} else {
-		code = errcode.ErrInternalServer.Code
-		msg = err.Error()
 	}
 
 	c.JSON(http.StatusOK, Response{
-		Code: code,
-		Msg:  msg,
+		Code:    code,
+		Message: msg,
 	})
 }
 
 // ErrorWithCode sends an error response with specific error code
 func ErrorWithCode(ctx context.Context, c *app.RequestContext, e *errcode.Error) {
 	c.JSON(http.StatusOK, Response{
-		Code: e.Code,
-		Msg:  e.Msg,
+		Code:    e.Code,
+		Message: e.Msg,
 	})
 }
 
@@ -57,8 +57,8 @@ func Unauthorized(ctx context.Context, c *app.RequestContext, msg string) {
 		msg = "unauthorized"
 	}
 	c.JSON(http.StatusUnauthorized, Response{
-		Code: errcode.ErrUnauthorized.Code,
-		Msg:  msg,
+		Code:    errcode.ErrUnauthorized.Code,
+		Message: msg,
 	})
 }
 
@@ -68,7 +68,7 @@ func Forbidden(ctx context.Context, c *app.RequestContext, msg string) {
 		msg = "forbidden"
 	}
 	c.JSON(http.StatusForbidden, Response{
-		Code: errcode.ErrForbidden.Code,
-		Msg:  msg,
+		Code:    errcode.ErrForbidden.Code,
+		Message: msg,
 	})
 }
