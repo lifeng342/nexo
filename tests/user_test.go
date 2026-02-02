@@ -35,7 +35,7 @@ func TestUser_GetInfo(t *testing.T) {
 		otherClient, _ := RegisterAndLogin(t, otherUserId, "Other User", "password123")
 		_ = otherClient // Just to create the user
 
-		resp, err := client.GET("/user/info/" + otherUserId)
+		resp, err := client.GET("/user/profile/" + otherUserId)
 		if err != nil {
 			t.Fatalf("get other user info failed: %v", err)
 		}
@@ -53,7 +53,7 @@ func TestUser_GetInfo(t *testing.T) {
 	})
 
 	t.Run("get non-existent user info", func(t *testing.T) {
-		resp, err := client.GET("/user/info/non_existent_user_12345")
+		resp, err := client.GET("/user/profile/non_existent_user_12345")
 		if err != nil {
 			t.Fatalf("get user info failed: %v", err)
 		}

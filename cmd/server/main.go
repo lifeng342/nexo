@@ -69,7 +69,7 @@ func main() {
 	// Initialize handlers
 	handlers := &router.Handlers{
 		Auth:         handler.NewAuthHandler(authService),
-		User:         handler.NewUserHandler(userService),
+		User:         handler.NewUserHandler(userService, wsServer),
 		Group:        handler.NewGroupHandler(groupService),
 		Message:      handler.NewMessageHandler(msgService),
 		Conversation: handler.NewConversationHandler(convService),

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/mbeoliero/nexo/internal/gateway"
 	"github.com/mbeoliero/nexo/internal/middleware"
 	"github.com/mbeoliero/nexo/internal/service"
 	"github.com/mbeoliero/nexo/pkg/errcode"
@@ -13,11 +14,15 @@ import (
 // UserHandler handles user-related requests
 type UserHandler struct {
 	userService *service.UserService
+	wsServer    *gateway.WsServer
 }
 
 // NewUserHandler creates a new UserHandler
-func NewUserHandler(userService *service.UserService) *UserHandler {
-	return &UserHandler{userService: userService}
+func NewUserHandler(userService *service.UserService, wsServer *gateway.WsServer) *UserHandler {
+	return &UserHandler{
+		userService: userService,
+		wsServer:    wsServer,
+	}
 }
 
 // GetUserInfo handles get user info request
@@ -75,4 +80,21 @@ func (h *UserHandler) UpdateUserInfo(ctx context.Context, c *app.RequestContext)
 	}
 
 	response.Success(ctx, c, userInfo)
+}
+
+// GetUsersOnlineStatusReq represents the request for getting users' online status
+type GetUsersOnlineStatusReq struct {
+	UserIds []string `json:"user_ids" vd:"len($)>0"`
+}
+
+// GetUsersOnlineStatus handles get users online status request
+func (h *UserHandler) GetUsersOnlineStatus(ctx context.Context, c *app.RequestContext) {
+	var req GetUsersOnlineStatusReq
+	if err := c.BindAndValidate(&req); err != nil {
+		response.ErrorWithCode(ctx, c, errcode.ErrInvalidParam)
+		return
+	}
+
+	results := h.wsServer.GetUsersOnlineStatus(req.UserIds)
+	response.Success(ctx, c, results)
 }

@@ -28,11 +28,20 @@ type WSClient struct {
 
 // NewWSClient creates a new WebSocket client
 func NewWSClient(token, userId string) (*WSClient, error) {
+	// Parse base URL to get host
+	baseURL := testConfig.BaseURL
+	host := "localhost:8080"
+	if len(baseURL) > 7 && baseURL[:7] == "http://" {
+		host = baseURL[7:]
+	} else if len(baseURL) > 8 && baseURL[:8] == "https://" {
+		host = baseURL[8:]
+	}
+
 	u := url.URL{
 		Scheme:   "ws",
-		Host:     "localhost:8080",
+		Host:     host,
 		Path:     "/ws",
-		RawQuery: fmt.Sprintf("token=%s&send_id=%s&platform_id=1", token, userId),
+		RawQuery: fmt.Sprintf("token=%s&send_id=%s&platform_id=5", token, userId),
 	}
 
 	header := http.Header{}
@@ -129,9 +138,18 @@ func TestWebSocket_Connect(t *testing.T) {
 	})
 
 	t.Run("connect without token", func(t *testing.T) {
+		// Parse base URL to get host
+		baseURL := testConfig.BaseURL
+		host := "localhost:8080"
+		if len(baseURL) > 7 && baseURL[:7] == "http://" {
+			host = baseURL[7:]
+		} else if len(baseURL) > 8 && baseURL[:8] == "https://" {
+			host = baseURL[8:]
+		}
+
 		u := url.URL{
 			Scheme: "ws",
-			Host:   "localhost:8080",
+			Host:   host,
 			Path:   "/ws",
 		}
 

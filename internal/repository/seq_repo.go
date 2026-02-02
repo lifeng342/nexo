@@ -177,18 +177,34 @@ func (r *SeqRepo) SetSeqUserMaxSeq(ctx context.Context, tx *gorm.DB, userId, con
 // UpdateReadSeq updates the read_seq for a user in a conversation
 // Uses upsert to create record if it doesn't exist
 func (r *SeqRepo) UpdateReadSeq(ctx context.Context, userId, conversationId string, readSeq int64) error {
+	// First try to get existing record
+	var existing entity.SeqUser
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND conversation_id = ?", userId, conversationId).
+		First(&existing).Error
+
+	if err == nil {
+		// Record exists, update if new read_seq is greater
+		if readSeq > existing.ReadSeq {
+			return r.db.WithContext(ctx).
+				Model(&entity.SeqUser{}).
+				Where("user_id = ? AND conversation_id = ?", userId, conversationId).
+				Update("read_seq", readSeq).Error
+		}
+		return nil
+	}
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	// Record doesn't exist, create new one
 	seqUser := &entity.SeqUser{
 		UserId:         userId,
 		ConversationId: conversationId,
 		ReadSeq:        readSeq,
 	}
-
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "user_id"}, {Name: "conversation_id"}},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"read_seq": gorm.Expr("GREATEST(read_seq, ?)", readSeq),
-		}),
-	}).Create(seqUser).Error
+	return r.db.WithContext(ctx).Create(seqUser).Error
 }
 
 // GetConversationSeqInfo gets sequence info for a conversation

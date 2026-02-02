@@ -54,27 +54,29 @@ func (c *hertzWebSocketClientConn) writeLoop() {
 	ticker := time.NewTicker(c.pingPeriod)
 	defer func() {
 		ticker.Stop()
+		// Recover from panic when writing to closed connection
+		if r := recover(); r != nil {
+			log.Debug("writeLoop recovered from panic: %v", r)
+		}
 		c.conn.Close()
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.writeChan:
-			c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
 			if !ok {
-				// Channel closed, send close message
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				// Channel closed, try to send close message but don't panic
+				c.safeWriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
-			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
-				log.Warn("write message error: %v", err)
+			if err := c.safeWriteMessage(websocket.BinaryMessage, message); err != nil {
+				log.Debug("write message error: %v", err)
 				return
 			}
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := c.safeWriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Debug("ping error: %v", err)
 				return
 			}
@@ -83,6 +85,19 @@ func (c *hertzWebSocketClientConn) writeLoop() {
 			return
 		}
 	}
+}
+
+// safeWriteMessage writes a message with proper error handling
+func (c *hertzWebSocketClientConn) safeWriteMessage(messageType int, data []byte) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debug("safeWriteMessage recovered from panic: %v", r)
+			err = ErrConnClosed
+		}
+	}()
+
+	c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.conn.WriteMessage(messageType, data)
 }
 
 // ReadMessage reads a message from the connection

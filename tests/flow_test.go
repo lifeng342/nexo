@@ -241,7 +241,7 @@ func TestFullFlow_GroupChat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send message failed: %v", err)
 	}
-	AssertError(t, resp, 3003, "quit member should not be able to send")
+	AssertError(t, resp, 3004, "quit member should not be able to send")
 
 	t.Log("Full group chat flow completed successfully!")
 }

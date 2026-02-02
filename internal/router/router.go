@@ -37,8 +37,9 @@ func SetupRouter(h *server.Hertz, handlers *Handlers, wsServer *gateway.WsServer
 	userGroup := h.Group("/user", middleware.JWTAuth())
 	{
 		userGroup.GET("/info", handlers.User.GetUserInfo)
-		userGroup.GET("/info/:user_id", handlers.User.GetUserInfoById)
+		userGroup.GET("/profile/:user_id", handlers.User.GetUserInfoById)
 		userGroup.PUT("/update", handlers.User.UpdateUserInfo)
+		userGroup.POST("/get_users_online_status", handlers.User.GetUsersOnlineStatus)
 	}
 
 	// Group routes (auth required)

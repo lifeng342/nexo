@@ -13,6 +13,7 @@ import (
 	"github.com/mbeoliero/nexo/internal/config"
 	"github.com/mbeoliero/nexo/internal/entity"
 	"github.com/mbeoliero/nexo/internal/service"
+	"github.com/mbeoliero/nexo/pkg/constant"
 	"github.com/mbeoliero/nexo/pkg/errcode"
 	"github.com/mbeoliero/nexo/pkg/jwt"
 	"github.com/redis/go-redis/v9"
@@ -20,24 +21,24 @@ import (
 
 // WsServer is the WebSocket server
 type WsServer struct {
-	upgrader         *websocket.Upgrader
-	cfg              *config.Config
-	userMap          *UserMap
-	registerChan     chan *Client
-	unregisterChan   chan *Client
-	pushChan         chan *PushTask
-	msgService       *service.MessageService
-	convService      *service.ConversationService
-	onlineUserNum    atomic.Int64
-	onlineConnNum    atomic.Int64
-	maxConnNum       int64
+	upgrader       *websocket.Upgrader
+	cfg            *config.Config
+	userMap        *UserMap
+	registerChan   chan *Client
+	unregisterChan chan *Client
+	pushChan       chan *PushTask
+	msgService     *service.MessageService
+	convService    *service.ConversationService
+	onlineUserNum  atomic.Int64
+	onlineConnNum  atomic.Int64
+	maxConnNum     int64
 }
 
 // PushTask represents a message push task
 type PushTask struct {
-	Msg        *entity.Message
-	TargetIds  []string
-	ExcludeId  string // Exclude specific connection Id
+	Msg       *entity.Message
+	TargetIds []string
+	ExcludeId string // Exclude specific connection Id
 }
 
 // NewWsServer creates a new WebSocket server
@@ -241,6 +242,46 @@ func (s *WsServer) GetOnlineConnCount() int64 {
 	return s.onlineConnNum.Load()
 }
 
+// OnlineStatusResult represents a user's online status
+type OnlineStatusResult struct {
+	UserId               string                  `json:"user_id"`
+	Status               int                     `json:"status"` // 0=offline, 1=online
+	DetailPlatformStatus []*PlatformStatusDetail `json:"detail_platform_status,omitempty"`
+}
+
+// PlatformStatusDetail represents online status detail for a specific platform
+type PlatformStatusDetail struct {
+	PlatformId   int    `json:"platform_id"`
+	PlatformName string `json:"platform_name"`
+	ConnId       string `json:"conn_id"`
+}
+
+// GetUsersOnlineStatus returns online status for the given user IDs
+func (s *WsServer) GetUsersOnlineStatus(userIds []string) []*OnlineStatusResult {
+	results := make([]*OnlineStatusResult, 0, len(userIds))
+	for _, userId := range userIds {
+		result := &OnlineStatusResult{
+			UserId: userId,
+			Status: constant.StatusOffline,
+		}
+
+		clients, ok := s.userMap.GetAll(userId)
+		if ok && len(clients) > 0 {
+			result.Status = constant.StatusOnline
+			result.DetailPlatformStatus = make([]*PlatformStatusDetail, 0, len(clients))
+			for _, client := range clients {
+				result.DetailPlatformStatus = append(result.DetailPlatformStatus, &PlatformStatusDetail{
+					PlatformId:   client.PlatformId,
+					PlatformName: constant.PlatformIdToName(client.PlatformId),
+					ConnId:       client.ConnId,
+				})
+			}
+		}
+
+		results = append(results, result)
+	}
+	return results
+}
 
 // messageToMsgData converts entity.Message to MessageData
 func (s *WsServer) messageToMsgData(msg *entity.Message) *MessageData {

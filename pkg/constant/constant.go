@@ -36,6 +36,12 @@ const (
 	RoleLevelOwner  = 2
 )
 
+// Online status
+const (
+	StatusOffline = 0
+	StatusOnline  = 1
+)
+
 // Receive message options
 const (
 	RecvMsgOptNormal    = 0 // Normal receive

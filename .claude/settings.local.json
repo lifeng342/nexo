@@ -35,7 +35,13 @@
       "Bash(xargs kill -9)",
       "Bash(docker info:*)",
       "Bash(docker-compose ps:*)",
-      "Bash(docker compose ps)"
+      "Bash(docker compose ps)",
+      "Bash(head -20 tests/*.go)",
+      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
+      "Bash(pgrep:*)",
+      "Bash(kill 36930)",
+      "Bash(chmod:*)",
+      "Bash(make:*)"
     ]
   }
 }
