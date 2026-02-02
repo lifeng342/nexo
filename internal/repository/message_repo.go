@@ -22,9 +22,6 @@ func NewMessageRepo(db *gorm.DB, rdb *redis.Client) *MessageRepo {
 
 // Create creates a new message
 func (r *MessageRepo) Create(ctx context.Context, tx *gorm.DB, msg *entity.Message) error {
-	now := entity.NowUnixMilli()
-	msg.CreatedAt = now
-	msg.UpdatedAt = now
 	return tx.WithContext(ctx).Create(msg).Error
 }
 

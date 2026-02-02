@@ -21,9 +21,6 @@ func NewUserRepo(db *gorm.DB, rdb *redis.Client) *UserRepo {
 
 // Create creates a new user
 func (r *UserRepo) Create(ctx context.Context, user *entity.User) error {
-	now := entity.NowUnixMilli()
-	user.CreatedAt = now
-	user.UpdatedAt = now
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
@@ -49,7 +46,6 @@ func (r *UserRepo) GetByIds(ctx context.Context, ids []string) ([]*entity.User, 
 
 // Update updates user info
 func (r *UserRepo) Update(ctx context.Context, id string, updates map[string]interface{}) error {
-	updates["updated_at"] = entity.NowUnixMilli()
 	return r.db.WithContext(ctx).Model(&entity.User{}).Where("id = ?", id).Updates(updates).Error
 }
 

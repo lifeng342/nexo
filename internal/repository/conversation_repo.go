@@ -23,24 +23,15 @@ func NewConversationRepo(db *gorm.DB, rdb *redis.Client) *ConversationRepo {
 
 // Create creates a new conversation
 func (r *ConversationRepo) Create(ctx context.Context, conv *entity.Conversation) error {
-	now := entity.NowUnixMilli()
-	conv.CreatedAt = now
-	conv.UpdatedAt = now
 	return r.db.WithContext(ctx).Create(conv).Error
 }
 
 // Upsert creates or updates a conversation
 func (r *ConversationRepo) Upsert(ctx context.Context, conv *entity.Conversation) error {
-	now := entity.NowUnixMilli()
-	conv.UpdatedAt = now
-	if conv.CreatedAt == 0 {
-		conv.CreatedAt = now
-	}
-
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "owner_id"}, {Name: "conversation_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"updated_at": now,
+			"updated_at": entity.NowUnixMilli(),
 		}),
 	}).Create(conv).Error
 }
@@ -99,7 +90,6 @@ func (r *ConversationRepo) GetUserConversationsWithSeq(ctx context.Context, owne
 
 // Update updates conversation settings
 func (r *ConversationRepo) Update(ctx context.Context, ownerId, conversationId string, updates map[string]interface{}) error {
-	updates["updated_at"] = entity.NowUnixMilli()
 	return r.db.WithContext(ctx).
 		Model(&entity.Conversation{}).
 		Where("owner_id = ? AND conversation_id = ?", ownerId, conversationId).
@@ -114,22 +104,18 @@ func (r *ConversationRepo) Touch(ctx context.Context, ownerId, conversationId st
 // EnsureSingleChatConversations ensures conversations exist for both parties in a single chat
 // Each party's conversation has the other party as peer_user_id
 func (r *ConversationRepo) EnsureSingleChatConversations(ctx context.Context, tx *gorm.DB, conversationId string, senderId, recvId string) error {
-	now := entity.NowUnixMilli()
-
 	// Create conversation for sender (peer is receiver)
 	senderConv := &entity.Conversation{
 		ConversationId:   conversationId,
 		OwnerId:          senderId,
 		ConversationType: 1, // Single chat
 		PeerUserId:       recvId,
-		CreatedAt:        now,
-		UpdatedAt:        now,
 	}
 
 	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "owner_id"}, {Name: "conversation_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"updated_at": now,
+			"updated_at": entity.NowUnixMilli(),
 		}),
 	}).Create(senderConv).Error; err != nil {
 		return err
@@ -141,14 +127,12 @@ func (r *ConversationRepo) EnsureSingleChatConversations(ctx context.Context, tx
 		OwnerId:          recvId,
 		ConversationType: 1, // Single chat
 		PeerUserId:       senderId,
-		CreatedAt:        now,
-		UpdatedAt:        now,
 	}
 
 	return tx.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "owner_id"}, {Name: "conversation_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"updated_at": now,
+			"updated_at": entity.NowUnixMilli(),
 		}),
 	}).Create(recvConv).Error
 }
@@ -157,8 +141,6 @@ func (r *ConversationRepo) EnsureSingleChatConversations(ctx context.Context, tx
 // For single chat: creates conversation for both users
 // For group chat: creates conversation for the user
 func (r *ConversationRepo) EnsureConversationsExist(ctx context.Context, tx *gorm.DB, conversationId string, convType int32, userIds []string, groupId, peerUserId string) error {
-	now := entity.NowUnixMilli()
-
 	for _, userId := range userIds {
 		conv := &entity.Conversation{
 			ConversationId:   conversationId,
@@ -166,8 +148,6 @@ func (r *ConversationRepo) EnsureConversationsExist(ctx context.Context, tx *gor
 			ConversationType: convType,
 			GroupId:          groupId,
 			PeerUserId:       peerUserId,
-			CreatedAt:        now,
-			UpdatedAt:        now,
 		}
 
 		// For single chat, set peer_user_id correctly for each party
@@ -179,7 +159,7 @@ func (r *ConversationRepo) EnsureConversationsExist(ctx context.Context, tx *gor
 		err := tx.WithContext(ctx).Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "owner_id"}, {Name: "conversation_id"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{
-				"updated_at": now,
+				"updated_at": entity.NowUnixMilli(),
 			}),
 		}).Create(conv).Error
 

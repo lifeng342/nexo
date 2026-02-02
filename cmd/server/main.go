@@ -19,13 +19,13 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx := context.TODO()
 
 	// Load configuration
 	cfg, err := config.Load("config/config.yaml")
 	if err != nil {
 		log.CtxError(ctx, "failed to load config: %v", err)
-		os.Exit(1)
+		panic(err)
 	}
 
 	log.CtxInfo(ctx, "config loaded: mode=%s", cfg.Server.Mode)
@@ -38,14 +38,14 @@ func main() {
 	repos, err := repository.NewRepositories(cfg)
 	if err != nil {
 		log.CtxError(ctx, "failed to initialize repositories: %v", err)
-		os.Exit(1)
+		panic(err)
 	}
 	defer repos.Close()
 
 	// Check database connection
 	if err := repos.CheckConnection(ctx); err != nil {
 		log.CtxError(ctx, "database connection check failed: %v", err)
-		os.Exit(1)
+		panic(err)
 	}
 	log.CtxInfo(ctx, "database connection established")
 

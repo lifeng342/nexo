@@ -12,8 +12,8 @@ type Group struct {
 	Status        int32   `json:"status" gorm:"column:status"`
 	CreatorUserId string  `json:"creator_user_id" gorm:"column:creator_user_id"`
 	GroupType     int32   `json:"group_type" gorm:"column:group_type"`
-	CreatedAt     int64   `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt     int64   `json:"updated_at" gorm:"column:updated_at"`
+	CreatedAt     int64   `json:"created_at" gorm:"column:created_at;autoCreateTime:milli"`
+	UpdatedAt     int64   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime:milli"`
 }
 
 // TableName returns the table name for Group
@@ -39,8 +39,8 @@ type GroupMember struct {
 	JoinedAt      int64   `json:"joined_at" gorm:"column:joined_at"`
 	JoinSeq       int64   `json:"join_seq" gorm:"column:join_seq"`
 	InviterUserId string  `json:"inviter_user_id" gorm:"column:inviter_user_id"`
-	CreatedAt     int64   `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt     int64   `json:"updated_at" gorm:"column:updated_at"`
+	CreatedAt     int64   `json:"created_at" gorm:"column:created_at;autoCreateTime:milli"`
+	UpdatedAt     int64   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime:milli"`
 }
 
 // TableName returns the table name for GroupMember

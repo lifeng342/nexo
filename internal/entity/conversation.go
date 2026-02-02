@@ -11,8 +11,8 @@ type Conversation struct {
 	RecvMsgOpt       int32   `json:"recv_msg_opt" gorm:"column:recv_msg_opt"`
 	IsPinned         bool    `json:"is_pinned" gorm:"column:is_pinned"`
 	Extra            *string `json:"extra" gorm:"column:extra;type:json"`
-	CreatedAt        int64   `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt        int64   `json:"updated_at" gorm:"column:updated_at"`
+	CreatedAt        int64   `json:"created_at" gorm:"column:created_at;autoCreateTime:milli"`
+	UpdatedAt        int64   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime:milli"`
 }
 
 // TableName returns the table name for Conversation

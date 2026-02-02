@@ -29,8 +29,8 @@ type Message struct {
 	ContentCustom  *string `json:"content_custom" gorm:"column:content_custom;type:json"`
 	Extra          *string `json:"extra" gorm:"column:extra;type:json"`
 	SendAt         int64   `json:"send_at" gorm:"column:send_at"`
-	CreatedAt      int64   `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt      int64   `json:"updated_at" gorm:"column:updated_at"`
+	CreatedAt      int64   `json:"created_at" gorm:"column:created_at;autoCreateTime:milli"`
+	UpdatedAt      int64   `json:"updated_at" gorm:"column:updated_at;autoUpdateTime:milli"`
 }
 
 // TableName returns the table name for Message

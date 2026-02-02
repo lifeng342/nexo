@@ -24,9 +24,6 @@ func NewGroupRepo(db *gorm.DB, rdb *redis.Client) *GroupRepo {
 
 // Create creates a new group
 func (r *GroupRepo) Create(ctx context.Context, group *entity.Group) error {
-	now := entity.NowUnixMilli()
-	group.CreatedAt = now
-	group.UpdatedAt = now
 	return r.db.WithContext(ctx).Create(group).Error
 }
 
@@ -52,7 +49,6 @@ func (r *GroupRepo) GetByIdWithTx(ctx context.Context, tx *gorm.DB, id string) (
 
 // Update updates group info
 func (r *GroupRepo) Update(ctx context.Context, id string, updates map[string]interface{}) error {
-	updates["updated_at"] = entity.NowUnixMilli()
 	return r.db.WithContext(ctx).Model(&entity.Group{}).Where("id = ?", id).Updates(updates).Error
 }
 
@@ -63,20 +59,16 @@ func (r *GroupRepo) Dismiss(ctx context.Context, id string) error {
 
 // AddMember adds a member to group using ON DUPLICATE KEY UPDATE for rejoining
 func (r *GroupRepo) AddMember(ctx context.Context, tx *gorm.DB, member *entity.GroupMember) error {
-	now := entity.NowUnixMilli()
-	member.CreatedAt = now
-	member.UpdatedAt = now
-
 	// Use ON DUPLICATE KEY UPDATE for handling rejoin scenario
 	result := tx.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "group_id"}, {Name: "user_id"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"status":         constant.GroupMemberStatusNormal,
-			"joined_at":      member.JoinedAt,
-			"join_seq":       member.JoinSeq,
-			"role_level":     member.RoleLevel,
+			"status":          constant.GroupMemberStatusNormal,
+			"joined_at":       member.JoinedAt,
+			"join_seq":        member.JoinSeq,
+			"role_level":      member.RoleLevel,
 			"inviter_user_id": member.InviterUserId,
-			"updated_at":     now,
+			"updated_at":      entity.NowUnixMilli(),
 		}),
 	}).Create(member)
 
@@ -144,8 +136,7 @@ func (r *GroupRepo) UpdateMemberStatus(ctx context.Context, tx *gorm.DB, groupId
 		Model(&entity.GroupMember{}).
 		Where("group_id = ? AND user_id = ?", groupId, userId).
 		Updates(map[string]interface{}{
-			"status":     status,
-			"updated_at": entity.NowUnixMilli(),
+			"status": status,
 		}).Error
 	if err != nil {
 		return err
