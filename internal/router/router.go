@@ -37,6 +37,7 @@ func SetupRouter(h *server.Hertz, handlers *Handlers, wsServer *gateway.WsServer
 		userGroup.GET("/info", handlers.User.GetUserInfo)
 		userGroup.GET("/profile/:user_id", handlers.User.GetUserInfoById)
 		userGroup.PUT("/update", handlers.User.UpdateUserInfo)
+		userGroup.POST("/batch_info", handlers.User.GetUsersInfo)
 		userGroup.POST("/get_users_online_status", handlers.User.GetUsersOnlineStatus)
 	}
 

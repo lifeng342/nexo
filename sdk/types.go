@@ -119,6 +119,11 @@ type UpdateUserRequest struct {
 	Extra    string `json:"extra,omitempty"`
 }
 
+// GetUsersInfoRequest represents batch get users info request
+type GetUsersInfoRequest struct {
+	UserIds []string `json:"user_ids"`
+}
+
 // GetUsersOnlineStatusRequest represents get users online status request
 type GetUsersOnlineStatusRequest struct {
 	UserIds []string `json:"user_ids"`

@@ -3,6 +3,7 @@ module github.com/mbeoliero/nexo
 go 1.25.5
 
 require (
+	github.com/mbeoliero/nexo/common v0.0.0
 	github.com/cloudwego/hertz v0.10.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -70,3 +71,5 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/mbeoliero/nexo/common => ./common

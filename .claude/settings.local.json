@@ -41,7 +41,13 @@
       "Bash(pgrep:*)",
       "Bash(kill 36930)",
       "Bash(chmod:*)",
-      "Bash(make:*)"
+      "Bash(make:*)",
+      "Bash(npx react-native@latest init NexoDemo --template react-native-template-typescript --skip-install)",
+      "Bash(npx @react-native-community/cli init NexoDemo --template react-native-template-typescript --skip-install)",
+      "Bash(npx @react-native-community/cli@latest init NexoDemo --skip-install)",
+      "Bash(npm install)",
+      "Bash(bundle install)",
+      "Bash(bundle exec pod install)"
     ]
   }
 }

@@ -15,10 +15,10 @@ import (
 
 	"github.com/mbeoliero/nexo/internal/config"
 	"github.com/mbeoliero/nexo/internal/entity"
+	"github.com/mbeoliero/nexo/internal/middleware"
 	"github.com/mbeoliero/nexo/internal/service"
 	"github.com/mbeoliero/nexo/pkg/constant"
 	"github.com/mbeoliero/nexo/pkg/errcode"
-	"github.com/mbeoliero/nexo/pkg/jwt"
 )
 
 // WsServer is the WebSocket server
@@ -200,17 +200,19 @@ func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 
-	platformId := 0
-	if platformIdStr != "" {
-		platformId, _ = strconv.Atoi(platformIdStr)
-	}
-
-	// Validate token
-	claims, err := jwt.ValidateToken(token, s.cfg.JWT.Secret, sendId, platformId)
+	// Validate token (supports external token fallback)
+	claims, err := middleware.ParseTokenWithFallback(token, s.cfg)
 	if err != nil {
 		log.CtxDebug(ctx, "token validation failed: send_id=%s, error=%v", sendId, err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Allow query param to override platform ID from claims
+	if platformIdStr != "" {
+		if pid, parseErr := strconv.Atoi(platformIdStr); parseErr == nil {
+			claims.PlatformId = pid
+		}
 	}
 
 	// Upgrade connection

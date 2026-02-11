@@ -29,6 +29,13 @@ jwt:
   secret: "nexo-im-secret-key-change-in-production"
   expire_hours: 168  # 7 days
 
+# External JWT: enable to accept tokens from another backend system
+external_jwt:
+  enabled: false
+  secret: "your-external-system-secret"
+  default_role: "user"      # "user" or "agent"
+  default_platform_id: 1    # Web
+
 websocket:
   max_conn_num: 10000
   max_message_size: 51200

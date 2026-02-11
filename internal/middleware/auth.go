@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
+
 	"github.com/mbeoliero/nexo/internal/config"
 	"github.com/mbeoliero/nexo/pkg/errcode"
 	"github.com/mbeoliero/nexo/pkg/jwt"
@@ -39,7 +40,7 @@ func JWTAuth() app.HandlerFunc {
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, BearerPrefix)
-		claims, err := jwt.ParseToken(tokenString, config.GlobalConfig.JWT.Secret)
+		claims, err := ParseTokenWithFallback(tokenString, config.GlobalConfig)
 		if err != nil {
 			response.ErrorWithCode(ctx, c, errcode.ErrTokenInvalid)
 			c.Abort()
@@ -52,6 +53,27 @@ func JWTAuth() app.HandlerFunc {
 
 		c.Next(ctx)
 	}
+}
+
+// ParseTokenWithFallback tries nexo token first, then falls back to external token if enabled.
+func ParseTokenWithFallback(tokenString string, cfg *config.Config) (*jwt.Claims, error) {
+	// Try nexo native token first
+	claims, err := jwt.ParseToken(tokenString, cfg.JWT.Secret)
+	if err == nil {
+		return claims, nil
+	}
+
+	// Fall back to external token if enabled
+	if cfg.ExternalJWT.Enabled {
+		return jwt.ParseExternalToken(
+			tokenString,
+			cfg.ExternalJWT.Secret,
+			cfg.ExternalJWT.DefaultRole,
+			cfg.ExternalJWT.DefaultPlatformId,
+		)
+	}
+
+	return nil, err
 }
 
 // GetUserId gets user Id from context

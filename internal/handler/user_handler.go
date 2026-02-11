@@ -82,6 +82,28 @@ func (h *UserHandler) UpdateUserInfo(ctx context.Context, c *app.RequestContext)
 	response.Success(ctx, c, userInfo)
 }
 
+// GetUsersInfoReq represents the request for batch getting users' info
+type GetUsersInfoReq struct {
+	UserIds []string `json:"user_ids" vd:"len($)>0,len($)<=100"`
+}
+
+// GetUsersInfo handles batch get users info request
+func (h *UserHandler) GetUsersInfo(ctx context.Context, c *app.RequestContext) {
+	var req GetUsersInfoReq
+	if err := c.BindAndValidate(&req); err != nil {
+		response.ErrorWithCode(ctx, c, errcode.ErrInvalidParam)
+		return
+	}
+
+	userInfos, err := h.userService.GetUserInfos(ctx, req.UserIds)
+	if err != nil {
+		response.Error(ctx, c, err)
+		return
+	}
+
+	response.Success(ctx, c, userInfos)
+}
+
 // GetUsersOnlineStatusReq represents the request for getting users' online status
 type GetUsersOnlineStatusReq struct {
 	UserIds []string `json:"user_ids" vd:"len($)>0"`

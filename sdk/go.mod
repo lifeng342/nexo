@@ -2,7 +2,10 @@ module github.com/mbeoliero/nexo/sdk
 
 go 1.21
 
-require github.com/cloudwego/hertz v0.10.3
+require (
+	github.com/cloudwego/hertz v0.10.3
+	github.com/mbeoliero/nexo/common v0.0.0
+)
 
 require (
 	github.com/bytedance/gopkg v0.1.1 // indirect
@@ -23,3 +26,5 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )
+
+replace github.com/mbeoliero/nexo/common => ../common

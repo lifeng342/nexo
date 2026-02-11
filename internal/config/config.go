@@ -9,11 +9,12 @@ import (
 
 // Config holds all configuration
 type Config struct {
-	Server    ServerConfig    `mapstructure:"server"`
-	MySQL     MySQLConfig     `mapstructure:"mysql"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	JWT       JWTConfig       `mapstructure:"jwt"`
-	WebSocket WebSocketConfig `mapstructure:"websocket"`
+	Server      ServerConfig      `mapstructure:"server"`
+	MySQL       MySQLConfig       `mapstructure:"mysql"`
+	Redis       RedisConfig       `mapstructure:"redis"`
+	JWT         JWTConfig         `mapstructure:"jwt"`
+	ExternalJWT ExternalJWTConfig `mapstructure:"external_jwt"`
+	WebSocket   WebSocketConfig   `mapstructure:"websocket"`
 }
 
 // ServerConfig holds server configuration
@@ -60,6 +61,14 @@ func (c *RedisConfig) Addr() string {
 type JWTConfig struct {
 	Secret      string `mapstructure:"secret"`
 	ExpireHours int    `mapstructure:"expire_hours"`
+}
+
+// ExternalJWTConfig holds external JWT configuration for integrating with other systems
+type ExternalJWTConfig struct {
+	Enabled           bool   `mapstructure:"enabled"`
+	Secret            string `mapstructure:"secret"`
+	DefaultRole       string `mapstructure:"default_role"`        // "user" or "agent", defaults to "user"
+	DefaultPlatformId int    `mapstructure:"default_platform_id"` // defaults to PlatformIdWeb(5)
 }
 
 // WebSocketConfig holds WebSocket configuration
@@ -115,6 +124,12 @@ func Load(configPath string) (*Config, error) {
 	}
 	if cfg.JWT.ExpireHours == 0 {
 		cfg.JWT.ExpireHours = 168 // 7 days
+	}
+	if cfg.ExternalJWT.DefaultRole == "" {
+		cfg.ExternalJWT.DefaultRole = "user"
+	}
+	if cfg.ExternalJWT.DefaultPlatformId == 0 {
+		cfg.ExternalJWT.DefaultPlatformId = 1 // ios
 	}
 	if cfg.WebSocket.MaxConnNum == 0 {
 		cfg.WebSocket.MaxConnNum = 10000

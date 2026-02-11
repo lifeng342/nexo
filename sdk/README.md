@@ -91,6 +91,10 @@ userInfo, err := client.GetUserInfo(ctx)
 // 获取指定用户信息
 userInfo, err := client.GetUserInfoById(ctx, "user456")
 
+// 批量获取用户信息
+userInfos, err := client.GetUsersInfo(ctx, []string{"user1", "user2", "user3"})
+// 最多支持 100 个用户 ID
+
 // 更新用户信息
 userInfo, err := client.UpdateUserInfo(ctx, &sdk.UpdateUserRequest{
     Nickname: "New Name",
