@@ -12,6 +12,7 @@ import (
 type ClientConn interface {
 	ReadMessage() ([]byte, error)
 	WriteMessage(data []byte) error
+	WriteControlMessage(data []byte, timeout time.Duration) error
 	Close() error
 	SetReadDeadline(t time.Time) error
 	SetWriteDeadline(t time.Time) error
@@ -32,14 +33,18 @@ type WebsocketClientConn struct {
 }
 
 // NewWebSocketClientConn creates a new websocket client connection
-func NewWebSocketClientConn(conn *websocket.Conn, maxMsgSize int64, pongWait, pingPeriod time.Duration) *WebsocketClientConn {
+func NewWebSocketClientConn(conn *websocket.Conn, maxMsgSize int64, writeWait, pongWait, pingPeriod time.Duration, writeChannelSize int) *WebsocketClientConn {
+	if writeChannelSize <= 0 {
+		writeChannelSize = 256
+	}
+
 	c := &WebsocketClientConn{
 		conn:       conn,
-		writeChan:  make(chan []byte, 256), // Buffered write channel
+		writeChan:  make(chan []byte, writeChannelSize),
 		closeChan:  make(chan struct{}),
 		pingPeriod: pingPeriod,
 		pongWait:   pongWait,
-		writeWait:  WriteWait,
+		writeWait:  writeWait,
 		maxMsgSize: maxMsgSize,
 	}
 
@@ -69,21 +74,19 @@ func (c *WebsocketClientConn) writeLoop() {
 	for {
 		select {
 		case message, ok := <-c.writeChan:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
 			if !ok {
 				// Channel closed, send close message
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.writeFrame(websocket.CloseMessage, []byte{})
 				return
 			}
 
-			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+			if err := c.writeFrame(websocket.BinaryMessage, message); err != nil {
 				log.Warn("write message error: %v", err)
 				return
 			}
 
 		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := c.writeFrame(websocket.PingMessage, nil); err != nil {
 				log.Debug("ping error: %v", err)
 				return
 			}
@@ -119,6 +122,22 @@ func (c *WebsocketClientConn) WriteMessage(data []byte) error {
 	}
 }
 
+// WriteControlMessage writes one control/drain message immediately.
+func (c *WebsocketClientConn) WriteControlMessage(data []byte, timeout time.Duration) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	if c.closed {
+		return ErrConnClosed
+	}
+
+	if timeout <= 0 {
+		timeout = c.writeWait
+	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(timeout))
+	return c.conn.WriteMessage(websocket.BinaryMessage, data)
+}
+
 // Close closes the connection
 func (c *WebsocketClientConn) Close() error {
 	c.closeOnce.Do(func() {
@@ -140,4 +159,16 @@ func (c *WebsocketClientConn) SetReadDeadline(t time.Time) error {
 // SetWriteDeadline sets the write deadline
 func (c *WebsocketClientConn) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
+}
+
+func (c *WebsocketClientConn) writeFrame(messageType int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	if c.closed {
+		return ErrConnClosed
+	}
+
+	_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+	return c.conn.WriteMessage(messageType, data)
 }

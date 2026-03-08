@@ -23,6 +23,13 @@ func SetupRouter(h *server.Hertz, handlers *Handlers, wsServer *gateway.WsServer
 	h.GET("/health", func(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusOK, map[string]string{"status": "ok"})
 	})
+	h.GET("/ready", func(ctx context.Context, c *app.RequestContext) {
+		if wsServer.IsReady() {
+			c.JSON(consts.StatusOK, map[string]string{"status": "ok"})
+			return
+		}
+		c.JSON(consts.StatusServiceUnavailable, map[string]string{"status": "draining"})
+	})
 
 	// Auth routes (no auth required)
 	authGroup := h.Group("/auth")

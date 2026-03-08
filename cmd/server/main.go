@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/google/uuid"
 	"github.com/mbeoliero/kit/log"
 
 	"github.com/mbeoliero/nexo/internal/config"
@@ -20,7 +22,7 @@ import (
 )
 
 func main() {
-	ctx := context.TODO()
+	ctx := context.Background()
 
 	// Load configuration
 	cfg, err := config.Load("config/config.yaml")
@@ -30,6 +32,9 @@ func main() {
 	}
 
 	log.CtxInfo(ctx, "config loaded: mode=%s", cfg.Server.Mode)
+	if cfg.WebSocket.CrossInstance.InstanceId == "" {
+		cfg.WebSocket.CrossInstance.InstanceId = uuid.NewString()
+	}
 
 	// Initialize Redis key prefix
 	constant.InitRedisKeyPrefix(cfg.Redis.KeyPrefix)
@@ -72,7 +77,7 @@ func main() {
 		Auth:         handler.NewAuthHandler(authService),
 		User:         handler.NewUserHandler(userService, wsServer),
 		Group:        handler.NewGroupHandler(groupService),
-		Message:      handler.NewMessageHandler(msgService),
+		Message:      handler.NewMessageHandler(msgService, wsServer.LifecycleGate()),
 		Conversation: handler.NewConversationHandler(convService),
 	}
 
@@ -94,13 +99,23 @@ func main() {
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	reason := gateway.DrainReasonPlannedUpgrade
+	select {
+	case <-quit:
+	case reason = <-wsServer.DrainRequests():
+	}
 
-	log.CtxInfo(ctx, "shutting down server...")
+	log.CtxInfo(ctx, "shutting down server: reason=%s", reason)
+	wsServer.BeginDrain(reason)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.WebSocket.CrossInstance.DrainTimeout()+5*time.Second)
+	defer cancel()
 
 	// Graceful shutdown
-	if err = h.Shutdown(ctx); err != nil {
+	if err = h.Shutdown(shutdownCtx); err != nil {
 		log.CtxError(ctx, "server shutdown error: %v", err)
+	}
+	if err = wsServer.Shutdown(shutdownCtx, reason); err != nil {
+		log.CtxError(ctx, "websocket shutdown error: %v", err)
 	}
 
 	log.CtxInfo(ctx, "server stopped")

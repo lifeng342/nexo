@@ -106,7 +106,7 @@ func (h *UserHandler) GetUsersInfo(ctx context.Context, c *app.RequestContext) {
 
 // GetUsersOnlineStatusReq represents the request for getting users' online status
 type GetUsersOnlineStatusReq struct {
-	UserIds []string `json:"user_ids" vd:"len($)>0"`
+	UserIds []string `json:"user_ids" vd:"len($)>0,len($)<=100"`
 }
 
 // GetUsersOnlineStatus handles get users online status request
@@ -117,6 +117,10 @@ func (h *UserHandler) GetUsersOnlineStatus(ctx context.Context, c *app.RequestCo
 		return
 	}
 
-	results := h.wsServer.GetUsersOnlineStatus(req.UserIds)
+	results, meta := h.wsServer.GetUsersOnlineStatus(ctx, req.UserIds)
+	if meta != nil {
+		response.SuccessWithMeta(ctx, c, results, meta)
+		return
+	}
 	response.Success(ctx, c, results)
 }

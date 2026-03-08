@@ -73,14 +73,101 @@ type ExternalJWTConfig struct {
 
 // WebSocketConfig holds WebSocket configuration
 type WebSocketConfig struct {
-	MaxConnNum       int64         `mapstructure:"max_conn_num"`
-	MaxMessageSize   int64         `mapstructure:"max_message_size"`
-	WriteWait        time.Duration `mapstructure:"write_wait"`
-	PongWait         time.Duration `mapstructure:"pong_wait"`
-	PingPeriod       time.Duration `mapstructure:"ping_period"`
-	PushChannelSize  int           `mapstructure:"push_channel_size"`
-	PushWorkerNum    int           `mapstructure:"push_worker_num"`
-	WriteChannelSize int           `mapstructure:"write_channel_size"`
+	MaxConnNum                     int64               `mapstructure:"max_conn_num"`
+	MaxMessageSize                 int64               `mapstructure:"max_message_size"`
+	WriteWait                      time.Duration       `mapstructure:"write_wait"`
+	PongWait                       time.Duration       `mapstructure:"pong_wait"`
+	PingPeriod                     time.Duration       `mapstructure:"ping_period"`
+	PushChannelSize                int                 `mapstructure:"push_channel_size"`
+	PushWorkerNum                  int                 `mapstructure:"push_worker_num"`
+	WriteChannelSize               int                 `mapstructure:"write_channel_size"`
+	RemoteEnvChannelSize           int                 `mapstructure:"remote_env_channel_size"`
+	RemoteEnvBlockTimeoutMS        int                 `mapstructure:"remote_env_block_timeout_ms"`
+	MaxBroadcastChunkBytes         int                 `mapstructure:"max_broadcast_chunk_bytes"`
+	PushDedupTTLSeconds            int                 `mapstructure:"push_dedup_ttl_seconds"`
+	RouteWriteQueueSize            int                 `mapstructure:"route_write_queue_size"`
+	RouteWriteWorkerNum            int                 `mapstructure:"route_write_worker_num"`
+	RouteStaleCleanupLimit         int                 `mapstructure:"route_stale_cleanup_limit"`
+	RouteTTLRefreshIntervalSeconds int                 `mapstructure:"route_ttl_refresh_interval_seconds"`
+	RouteReconcileIntervalSeconds  int                 `mapstructure:"route_reconcile_interval_seconds"`
+	CrossInstance                  CrossInstanceConfig `mapstructure:"cross_instance"`
+	Hybrid                         HybridConfig        `mapstructure:"hybrid"`
+}
+
+// CrossInstanceConfig holds cross-instance push configuration.
+type CrossInstanceConfig struct {
+	Enabled                         bool   `mapstructure:"enabled"`
+	InstanceId                      string `mapstructure:"instance_id"`
+	HeartbeatSeconds                int    `mapstructure:"heartbeat_second"`
+	RouteTTLSeconds                 int    `mapstructure:"route_ttl_seconds"`
+	InstanceAliveTTLSeconds         int    `mapstructure:"instance_alive_ttl_seconds"`
+	PublishFailThreshold            int    `mapstructure:"publish_fail_threshold"`
+	RouteSubscribeFailThreshold     int    `mapstructure:"route_subscribe_fail_threshold"`
+	BroadcastSubscribeFailThreshold int    `mapstructure:"broadcast_subscribe_fail_threshold"`
+	PushRouteFailThreshold          int    `mapstructure:"push_route_fail_threshold"`
+	PresenceReadFailThreshold       int    `mapstructure:"presence_read_fail_threshold"`
+	RecoverProbeIntervalSeconds     int    `mapstructure:"recover_probe_interval_seconds"`
+	RouteSubscribeDrainAfterSeconds int    `mapstructure:"route_subscribe_drain_after_seconds"`
+	DrainTimeoutSeconds             int    `mapstructure:"drain_timeout_seconds"`
+	DrainRouteableGraceSeconds      int    `mapstructure:"drain_routeable_grace_seconds"`
+	DrainKickBatchSize              int    `mapstructure:"drain_kick_batch_size"`
+	DrainKickIntervalMS             int    `mapstructure:"drain_kick_interval_ms"`
+}
+
+// HybridConfig holds hybrid route/broadcast selection configuration.
+type HybridConfig struct {
+	Enabled                bool `mapstructure:"enabled"`
+	GroupRouteMaxTargets   int  `mapstructure:"group_route_max_targets"`
+	GroupRouteMaxInstances int  `mapstructure:"group_route_max_instances"`
+	ForceBroadcast         bool `mapstructure:"force_broadcast"`
+}
+
+func (c WebSocketConfig) PushDedupTTL() time.Duration {
+	return time.Duration(c.PushDedupTTLSeconds) * time.Second
+}
+
+func (c WebSocketConfig) RouteTTLRefreshInterval() time.Duration {
+	return time.Duration(c.RouteTTLRefreshIntervalSeconds) * time.Second
+}
+
+func (c WebSocketConfig) RouteReconcileInterval() time.Duration {
+	return time.Duration(c.RouteReconcileIntervalSeconds) * time.Second
+}
+
+func (c WebSocketConfig) RemoteEnvBlockTimeout() time.Duration {
+	return time.Duration(c.RemoteEnvBlockTimeoutMS) * time.Millisecond
+}
+
+func (c CrossInstanceConfig) HeartbeatInterval() time.Duration {
+	return time.Duration(c.HeartbeatSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) RouteTTL() time.Duration {
+	return time.Duration(c.RouteTTLSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) InstanceAliveTTL() time.Duration {
+	return time.Duration(c.InstanceAliveTTLSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) RecoverProbeInterval() time.Duration {
+	return time.Duration(c.RecoverProbeIntervalSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) RouteSubscribeDrainAfter() time.Duration {
+	return time.Duration(c.RouteSubscribeDrainAfterSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) DrainTimeout() time.Duration {
+	return time.Duration(c.DrainTimeoutSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) DrainRouteableGrace() time.Duration {
+	return time.Duration(c.DrainRouteableGraceSeconds) * time.Second
+}
+
+func (c CrossInstanceConfig) DrainKickInterval() time.Duration {
+	return time.Duration(c.DrainKickIntervalMS) * time.Millisecond
 }
 
 // Global config instance
@@ -154,6 +241,81 @@ func Load(configPath string) (*Config, error) {
 	}
 	if cfg.WebSocket.WriteChannelSize == 0 {
 		cfg.WebSocket.WriteChannelSize = 256
+	}
+	if cfg.WebSocket.RemoteEnvChannelSize == 0 {
+		cfg.WebSocket.RemoteEnvChannelSize = 1024
+	}
+	if cfg.WebSocket.RemoteEnvBlockTimeoutMS == 0 {
+		cfg.WebSocket.RemoteEnvBlockTimeoutMS = 50
+	}
+	if cfg.WebSocket.MaxBroadcastChunkBytes == 0 {
+		cfg.WebSocket.MaxBroadcastChunkBytes = 128 * 1024
+	}
+	if cfg.WebSocket.PushDedupTTLSeconds == 0 {
+		cfg.WebSocket.PushDedupTTLSeconds = 300
+	}
+	if cfg.WebSocket.RouteWriteQueueSize == 0 {
+		cfg.WebSocket.RouteWriteQueueSize = 4096
+	}
+	if cfg.WebSocket.RouteWriteWorkerNum == 0 {
+		cfg.WebSocket.RouteWriteWorkerNum = 4
+	}
+	if cfg.WebSocket.RouteStaleCleanupLimit == 0 {
+		cfg.WebSocket.RouteStaleCleanupLimit = 64
+	}
+	if cfg.WebSocket.RouteTTLRefreshIntervalSeconds == 0 {
+		cfg.WebSocket.RouteTTLRefreshIntervalSeconds = 20
+	}
+	if cfg.WebSocket.RouteReconcileIntervalSeconds == 0 {
+		cfg.WebSocket.RouteReconcileIntervalSeconds = 60
+	}
+	if cfg.WebSocket.CrossInstance.HeartbeatSeconds == 0 {
+		cfg.WebSocket.CrossInstance.HeartbeatSeconds = 10
+	}
+	if cfg.WebSocket.CrossInstance.RouteTTLSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RouteTTLSeconds = 70
+	}
+	if cfg.WebSocket.CrossInstance.InstanceAliveTTLSeconds == 0 {
+		cfg.WebSocket.CrossInstance.InstanceAliveTTLSeconds = 30
+	}
+	if cfg.WebSocket.CrossInstance.PublishFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.PublishFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.RouteSubscribeFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.RouteSubscribeFailThreshold = 1
+	}
+	if cfg.WebSocket.CrossInstance.BroadcastSubscribeFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.BroadcastSubscribeFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.PushRouteFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.PushRouteFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.PresenceReadFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.PresenceReadFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.RecoverProbeIntervalSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RecoverProbeIntervalSeconds = 5
+	}
+	if cfg.WebSocket.CrossInstance.RouteSubscribeDrainAfterSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RouteSubscribeDrainAfterSeconds = 60
+	}
+	if cfg.WebSocket.CrossInstance.DrainTimeoutSeconds == 0 {
+		cfg.WebSocket.CrossInstance.DrainTimeoutSeconds = 30
+	}
+	if cfg.WebSocket.CrossInstance.DrainRouteableGraceSeconds == 0 {
+		cfg.WebSocket.CrossInstance.DrainRouteableGraceSeconds = 15
+	}
+	if cfg.WebSocket.CrossInstance.DrainKickBatchSize == 0 {
+		cfg.WebSocket.CrossInstance.DrainKickBatchSize = 200
+	}
+	if cfg.WebSocket.CrossInstance.DrainKickIntervalMS == 0 {
+		cfg.WebSocket.CrossInstance.DrainKickIntervalMS = 100
+	}
+	if cfg.WebSocket.Hybrid.GroupRouteMaxTargets == 0 {
+		cfg.WebSocket.Hybrid.GroupRouteMaxTargets = 100
+	}
+	if cfg.WebSocket.Hybrid.GroupRouteMaxInstances == 0 {
+		cfg.WebSocket.Hybrid.GroupRouteMaxInstances = 4
 	}
 
 	GlobalConfig = &cfg

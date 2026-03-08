@@ -15,6 +15,7 @@ type Response struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
+	Meta    any    `json:"meta,omitempty"`
 }
 
 // Success sends a success response
@@ -26,18 +27,20 @@ func Success(ctx context.Context, c *app.RequestContext, data any) {
 	})
 }
 
+// SuccessWithMeta sends a success response with extra meta.
+func SuccessWithMeta(ctx context.Context, c *app.RequestContext, data any, meta any) {
+	c.JSON(http.StatusOK, Response{
+		Code:    0,
+		Message: "success",
+		Data:    data,
+		Meta:    meta,
+	})
+}
+
 // Error sends an error response
 func Error(ctx context.Context, c *app.RequestContext, err error) {
-	var code int
-	var msg string
-
-	var e *errcode.Error
-	if errors.As(err, &e) {
-		code = e.Code
-		msg = e.Msg
-	}
-
-	c.JSON(http.StatusOK, Response{
+	code, msg, status := parseError(err)
+	c.JSON(status, Response{
 		Code:    code,
 		Message: msg,
 	})
@@ -45,7 +48,8 @@ func Error(ctx context.Context, c *app.RequestContext, err error) {
 
 // ErrorWithCode sends an error response with specific error code
 func ErrorWithCode(ctx context.Context, c *app.RequestContext, e *errcode.Error) {
-	c.JSON(http.StatusOK, Response{
+	_, _, status := parseError(e)
+	c.JSON(status, Response{
 		Code:    e.Code,
 		Message: e.Msg,
 	})
@@ -71,4 +75,21 @@ func Forbidden(ctx context.Context, c *app.RequestContext, msg string) {
 		Code:    errcode.ErrForbidden.Code,
 		Message: msg,
 	})
+}
+
+func parseError(err error) (int, string, int) {
+	code := errcode.ErrInternalServer.Code
+	msg := errcode.ErrInternalServer.Msg
+	status := http.StatusOK
+
+	var e *errcode.Error
+	if errors.As(err, &e) {
+		code = e.Code
+		msg = e.Msg
+	}
+	if code == errcode.ErrServerShuttingDown.Code {
+		status = http.StatusServiceUnavailable
+	}
+
+	return code, msg, status
 }

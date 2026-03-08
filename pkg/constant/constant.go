@@ -44,9 +44,9 @@ const (
 
 // Receive message options
 const (
-	RecvMsgOptNormal    = 0 // Normal receive
-	RecvMsgOptNoNotify  = 1 // No notification
-	RecvMsgOptNotRecv   = 2 // Do not receive
+	RecvMsgOptNormal   = 0 // Normal receive
+	RecvMsgOptNoNotify = 1 // No notification
+	RecvMsgOptNotRecv  = 2 // Do not receive
 )
 
 // Platform Ids
@@ -91,6 +91,11 @@ const (
 	redisKeyUser            = "user:%s"          // user:{user_id}
 	redisKeyGroupMembers    = "group:members:%s" // group:members:{group_id}
 	redisKeySeqConversation = "seq:conv:%s"      // seq:conv:{conversation_id}
+	redisKeyRouteUser       = "route:user:%s"    // route:user:{user_id}
+	redisKeyRouteInstance   = "route:inst:%s"    // route:inst:{instance_id}
+	redisKeyInstanceAlive   = "instance:alive:%s"
+	redisKeyPushInstance    = "push:instance:%s"
+	redisKeyPushBroadcast   = "push:broadcast"
 )
 
 // redisKeyPrefix is the global prefix for all Redis keys
@@ -115,3 +120,8 @@ func RedisKeyOnlineConns() string     { return redisKeyPrefix + redisKeyOnlineCo
 func RedisKeyUser() string            { return redisKeyPrefix + redisKeyUser }
 func RedisKeyGroupMembers() string    { return redisKeyPrefix + redisKeyGroupMembers }
 func RedisKeySeqConversation() string { return redisKeyPrefix + redisKeySeqConversation }
+func RedisKeyRouteUser() string       { return redisKeyPrefix + redisKeyRouteUser }
+func RedisKeyRouteInstance() string   { return redisKeyPrefix + redisKeyRouteInstance }
+func RedisKeyInstanceAlive() string   { return redisKeyPrefix + redisKeyInstanceAlive }
+func RedisKeyPushInstance() string    { return redisKeyPrefix + redisKeyPushInstance }
+func RedisKeyPushBroadcast() string   { return redisKeyPrefix + redisKeyPushBroadcast }

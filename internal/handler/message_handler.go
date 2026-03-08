@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 
+	"github.com/mbeoliero/nexo/internal/gateway"
 	"github.com/mbeoliero/nexo/internal/middleware"
 	"github.com/mbeoliero/nexo/internal/service"
 	"github.com/mbeoliero/nexo/pkg/errcode"
@@ -15,11 +16,15 @@ import (
 // MessageHandler handles message-related requests
 type MessageHandler struct {
 	msgService *service.MessageService
+	gate       gateway.LifecycleGate
 }
 
 // NewMessageHandler creates a new MessageHandler
-func NewMessageHandler(msgService *service.MessageService) *MessageHandler {
-	return &MessageHandler{msgService: msgService}
+func NewMessageHandler(msgService *service.MessageService, gate gateway.LifecycleGate) *MessageHandler {
+	return &MessageHandler{
+		msgService: msgService,
+		gate:       gate,
+	}
 }
 
 // SendMessage handles send message request (HTTP fallback)
@@ -34,6 +39,15 @@ func (h *MessageHandler) SendMessage(ctx context.Context, c *app.RequestContext)
 	if err := c.BindAndValidate(&req); err != nil {
 		response.ErrorWithCode(ctx, c, errcode.ErrInvalidParam)
 		return
+	}
+
+	if h.gate != nil {
+		release, err := h.gate.AcquireSendLease()
+		if err != nil {
+			response.Error(ctx, c, err)
+			return
+		}
+		defer release()
 	}
 
 	msg, err := h.msgService.SendMessage(ctx, userId, &req)

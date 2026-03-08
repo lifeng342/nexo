@@ -3,10 +3,14 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/mbeoliero/kit/log"
+
+	"github.com/mbeoliero/nexo/pkg/errcode"
 )
 
 // Client represents a connected WebSocket client
@@ -122,8 +126,7 @@ func (c *Client) reply(req *WSRequest, err error, data []byte) error {
 	}
 
 	if err != nil {
-		resp.ErrCode = 1
-		resp.ErrMsg = err.Error()
+		resp.ErrCode, resp.ErrMsg = wsErrCode(err)
 	}
 
 	return c.writeResponse(resp)
@@ -135,10 +138,17 @@ func (c *Client) replyError(req *WSRequest, err error) error {
 		ReqIdentifier: req.ReqIdentifier,
 		MsgIncr:       req.MsgIncr,
 		OperationId:   req.OperationId,
-		ErrCode:       1,
-		ErrMsg:        err.Error(),
 	}
+	resp.ErrCode, resp.ErrMsg = wsErrCode(err)
 	return c.writeResponse(resp)
+}
+
+func wsErrCode(err error) (int, string) {
+	var codeErr *errcode.Error
+	if errors.As(err, &codeErr) {
+		return codeErr.Code, codeErr.Msg
+	}
+	return 1, err.Error()
 }
 
 // writeResponse writes a response to the connection
@@ -188,8 +198,11 @@ func (c *Client) KickOnline() error {
 	resp := WSResponse{
 		ReqIdentifier: WSKickOnlineMsg,
 	}
-
-	_ = c.writeResponse(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	_ = c.conn.WriteControlMessage(data, 2*time.Second)
 	return c.Close()
 }
 

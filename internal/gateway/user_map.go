@@ -2,19 +2,14 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
-
-	"github.com/mbeoliero/nexo/pkg/constant"
-	"github.com/redis/go-redis/v9"
 )
 
 // UserMap manages user connections
 type UserMap struct {
 	mu    sync.RWMutex
 	users map[string]*UserPlatform // userId -> UserPlatform
-	rdb   *redis.Client
 }
 
 // UserPlatform holds all connections for a user
@@ -23,11 +18,10 @@ type UserPlatform struct {
 	Time    time.Time
 }
 
-// NewUserMap creates a new UserMap
-func NewUserMap(rdb *redis.Client) *UserMap {
+// NewUserMap creates a new UserMap.
+func NewUserMap() *UserMap {
 	return &UserMap{
 		users: make(map[string]*UserPlatform),
-		rdb:   rdb,
 	}
 }
 
@@ -47,8 +41,6 @@ func (m *UserMap) Register(ctx context.Context, client *Client) {
 	userPlatform.Clients = append(userPlatform.Clients, client)
 	userPlatform.Time = time.Now()
 
-	// Update Redis online status
-	m.setOnline(ctx, client.UserId)
 }
 
 // Unregister unregisters a client
@@ -73,7 +65,6 @@ func (m *UserMap) Unregister(ctx context.Context, client *Client) bool {
 	// If no more clients, remove user from map
 	if len(userPlatform.Clients) == 0 {
 		delete(m.users, client.UserId)
-		m.setOffline(ctx, client.UserId)
 		return true // User completely disconnected
 	}
 
@@ -143,53 +134,15 @@ func (m *UserMap) GetOnlineConnCount() int {
 	return count
 }
 
-// IsOnline checks if user is online (checks Redis for distributed support)
+// IsOnline checks whether the user has at least one local connection.
 func (m *UserMap) IsOnline(ctx context.Context, userId string) bool {
-	// First check local
-	if m.HasConnection(userId) {
-		return true
-	}
-
-	// Then check Redis for multi-instance support
-	if m.rdb != nil {
-		key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-		exists, _ := m.rdb.Exists(ctx, key).Result()
-		return exists > 0
-	}
-
-	return false
+	return m.HasConnection(userId)
 }
 
-// setOnline marks user as online in Redis
-func (m *UserMap) setOnline(ctx context.Context, userId string) {
-	if m.rdb == nil {
-		return
-	}
-
-	key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-	m.rdb.Set(ctx, key, "1", 60*time.Second)
-}
-
-// setOffline marks user as offline in Redis
-func (m *UserMap) setOffline(ctx context.Context, userId string) {
-	if m.rdb == nil {
-		return
-	}
-
-	key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-	m.rdb.Del(ctx, key)
-}
-
-// RefreshOnlineStatus refreshes the online status TTL
+// RefreshOnlineStatus is now handled by OnlineStateWriter.
 func (m *UserMap) RefreshOnlineStatus(ctx context.Context, userId string) {
-	if m.rdb == nil {
-		return
-	}
-
-	if m.HasConnection(userId) {
-		key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-		m.rdb.Expire(ctx, key, 60*time.Second)
-	}
+	_ = ctx
+	_ = userId
 }
 
 // GetAllOnlineUserIds returns all online user Ids (local only)
@@ -202,4 +155,35 @@ func (m *UserMap) GetAllOnlineUserIds() []string {
 		userIds = append(userIds, userId)
 	}
 	return userIds
+}
+
+// SnapshotRouteConns returns the local connections as route DTOs.
+func (m *UserMap) SnapshotRouteConns(instanceId string) []RouteConn {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conns := make([]RouteConn, 0, m.GetOnlineConnCount())
+	for userId, userPlatform := range m.users {
+		for _, client := range userPlatform.Clients {
+			conns = append(conns, RouteConn{
+				UserId:     userId,
+				ConnId:     client.ConnId,
+				InstanceId: instanceId,
+				PlatformId: client.PlatformId,
+			})
+		}
+	}
+	return conns
+}
+
+// SnapshotClients returns a flat copy of all local clients.
+func (m *UserMap) SnapshotClients() []*Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	clients := make([]*Client, 0, m.GetOnlineConnCount())
+	for _, userPlatform := range m.users {
+		clients = append(clients, userPlatform.Clients...)
+	}
+	return clients
 }

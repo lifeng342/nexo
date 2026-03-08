@@ -43,3 +43,38 @@ websocket:
   pong_wait: 30s
   ping_period: 27s
   push_channel_size: 10000
+  push_worker_num: 10
+  write_channel_size: 256
+  remote_env_channel_size: 1024
+  remote_env_block_timeout_ms: 50
+  max_broadcast_chunk_bytes: 131072
+  push_dedup_ttl_seconds: 300
+  route_write_queue_size: 4096
+  route_write_worker_num: 4
+  route_stale_cleanup_limit: 64
+  route_ttl_refresh_interval_seconds: 20
+  route_reconcile_interval_seconds: 60
+
+  cross_instance:
+    enabled: false
+    instance_id: ""
+    heartbeat_second: 10
+    route_ttl_seconds: 70
+    instance_alive_ttl_seconds: 30
+    publish_fail_threshold: 3
+    route_subscribe_fail_threshold: 1
+    broadcast_subscribe_fail_threshold: 3
+    push_route_fail_threshold: 3
+    presence_read_fail_threshold: 3
+    recover_probe_interval_seconds: 5
+    route_subscribe_drain_after_seconds: 60
+    drain_timeout_seconds: 30
+    drain_routeable_grace_seconds: 15
+    drain_kick_batch_size: 200
+    drain_kick_interval_ms: 100
+
+  hybrid:
+    enabled: true
+    group_route_max_targets: 100
+    group_route_max_instances: 4
+    force_broadcast: false
