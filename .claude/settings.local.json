@@ -47,7 +47,9 @@
       "Bash(npx @react-native-community/cli@latest init NexoDemo --skip-install)",
       "Bash(npm install)",
       "Bash(bundle install)",
-      "Bash(bundle exec pod install)"
+      "Bash(bundle exec pod install)",
+      "Bash(git:*)",
+      "Bash(command:*)"
     ]
   }
 }

@@ -2,26 +2,30 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/mbeoliero/nexo/internal/gateway"
 	"github.com/mbeoliero/nexo/internal/middleware"
 	"github.com/mbeoliero/nexo/internal/service"
 	"github.com/mbeoliero/nexo/pkg/errcode"
 	"github.com/mbeoliero/nexo/pkg/response"
 )
 
+type PresenceService interface {
+	GetUsersOnlineStatus(ctx context.Context, userIDs []string) ([]*service.OnlineStatusResult, response.Meta, error)
+}
+
 // UserHandler handles user-related requests
 type UserHandler struct {
 	userService *service.UserService
-	wsServer    *gateway.WsServer
+	presence    PresenceService
 }
 
 // NewUserHandler creates a new UserHandler
-func NewUserHandler(userService *service.UserService, wsServer *gateway.WsServer) *UserHandler {
+func NewUserHandler(userService *service.UserService, presence PresenceService) *UserHandler {
 	return &UserHandler{
 		userService: userService,
-		wsServer:    wsServer,
+		presence:    presence,
 	}
 }
 
@@ -106,17 +110,33 @@ func (h *UserHandler) GetUsersInfo(ctx context.Context, c *app.RequestContext) {
 
 // GetUsersOnlineStatusReq represents the request for getting users' online status
 type GetUsersOnlineStatusReq struct {
-	UserIds []string `json:"user_ids" vd:"len($)>0"`
+	UserIds []string `json:"user_ids" vd:"len($)>0,len($)<=100"`
 }
 
 // GetUsersOnlineStatus handles get users online status request
 func (h *UserHandler) GetUsersOnlineStatus(ctx context.Context, c *app.RequestContext) {
 	var req GetUsersOnlineStatusReq
-	if err := c.BindAndValidate(&req); err != nil {
+	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
+		response.ErrorWithCode(ctx, c, errcode.ErrInvalidParam)
+		return
+	}
+	if len(req.UserIds) == 0 || len(req.UserIds) > 100 {
 		response.ErrorWithCode(ctx, c, errcode.ErrInvalidParam)
 		return
 	}
 
-	results := h.wsServer.GetUsersOnlineStatus(req.UserIds)
+	if h.presence == nil {
+		response.ErrorWithCode(ctx, c, errcode.ErrServerShuttingDown)
+		return
+	}
+	results, meta, err := h.presence.GetUsersOnlineStatus(ctx, req.UserIds)
+	if err != nil {
+		response.Error(ctx, c, err)
+		return
+	}
+	if meta != nil {
+		response.SuccessWithMeta(ctx, c, results, meta)
+		return
+	}
 	response.Success(ctx, c, results)
 }

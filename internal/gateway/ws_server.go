@@ -23,17 +23,21 @@ import (
 
 // WsServer is the WebSocket server
 type WsServer struct {
-	upgrader       *websocket.Upgrader
-	cfg            *config.Config
-	userMap        *UserMap
-	registerChan   chan *Client
-	unregisterChan chan *Client
-	pushChan       chan *PushTask
-	msgService     *service.MessageService
-	convService    *service.ConversationService
-	onlineUserNum  atomic.Int64
-	onlineConnNum  atomic.Int64
-	maxConnNum     int64
+	upgrader         *websocket.Upgrader
+	cfg              *config.Config
+	userMap          *UserMap
+	registerChan     chan *Client
+	unregisterChan   chan *Client
+	pushChan         chan *PushTask
+	msgService       *service.MessageService
+	convService      *service.ConversationService
+	gate             LifecycleGate
+	routeStore       *RouteStore
+	instanceID       string
+	pushCoordinator  *PushCoordinator
+	onlineUserNum    atomic.Int64
+	onlineConnNum    atomic.Int64
+	maxConnNum       int64
 }
 
 // PushTask represents a message push task
@@ -44,7 +48,7 @@ type PushTask struct {
 }
 
 // NewWsServer creates a new WebSocket server
-func NewWsServer(cfg *config.Config, rdb *redis.Client, msgService *service.MessageService, convService *service.ConversationService) *WsServer {
+func NewWsServer(cfg *config.Config, rdb *redis.Client, msgService *service.MessageService, convService *service.ConversationService, gate LifecycleGate) *WsServer {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -75,6 +79,7 @@ func NewWsServer(cfg *config.Config, rdb *redis.Client, msgService *service.Mess
 		pushChan:       make(chan *PushTask, cfg.WebSocket.PushChannelSize),
 		msgService:     msgService,
 		convService:    convService,
+		gate:           gate,
 		maxConnNum:     cfg.WebSocket.MaxConnNum,
 	}
 
@@ -124,25 +129,12 @@ func (s *WsServer) pushLoop(ctx context.Context) {
 
 // processPushTask processes a single push task
 func (s *WsServer) processPushTask(ctx context.Context, task *PushTask) {
-	msgData := s.messageToMsgData(task.Msg)
-
-	for _, userId := range task.TargetIds {
-		clients, ok := s.userMap.GetAll(userId)
-		if !ok {
-			continue
-		}
-
-		for _, client := range clients {
-			// Skip excluded connection
-			if task.ExcludeId != "" && client.ConnId == task.ExcludeId {
-				continue
-			}
-
-			if err := client.PushMessage(ctx, msgData); err != nil {
-				log.CtxDebug(ctx, "push to client failed: user_id=%s, conn_id=%s, error=%v", userId, client.ConnId, err)
-			}
-		}
+	if s.pushCoordinator != nil {
+		s.pushCoordinator.processPushTask(ctx, task)
+		return
 	}
+	msgData := s.messageToMsgData(task.Msg)
+	s.PushToLocalClients(ctx, task, msgData)
 }
 
 // registerClient registers a client
@@ -153,6 +145,11 @@ func (s *WsServer) registerClient(ctx context.Context, client *Client) {
 	}
 
 	s.userMap.Register(ctx, client)
+	if s.routeStore != nil && s.instanceID != "" {
+		if err := s.routeStore.RegisterConn(ctx, RouteConn{UserId: client.UserId, ConnId: client.ConnId, InstanceId: s.instanceID, PlatformId: client.PlatformId}); err != nil {
+			log.CtxWarn(ctx, "route register failed: user_id=%s, conn_id=%s, instance_id=%s, error=%v", client.UserId, client.ConnId, s.instanceID, err)
+		}
+	}
 	s.onlineConnNum.Add(1)
 
 	log.CtxInfo(ctx, "client registered: user_id=%s, platform_id=%d, conn_id=%s, existing_conns=%d, online_users=%d, online_conns=%d",
@@ -161,7 +158,15 @@ func (s *WsServer) registerClient(ctx context.Context, client *Client) {
 
 // unregisterClient unregisters a client
 func (s *WsServer) unregisterClient(ctx context.Context, client *Client) {
-	isUserOffline := s.userMap.Unregister(ctx, client)
+	removed, isUserOffline := s.userMap.Unregister(ctx, client)
+	if !removed {
+		return
+	}
+	if s.routeStore != nil && s.instanceID != "" {
+		if err := s.routeStore.UnregisterConn(ctx, RouteConn{UserId: client.UserId, ConnId: client.ConnId, InstanceId: s.instanceID, PlatformId: client.PlatformId}); err != nil {
+			log.CtxWarn(ctx, "route unregister failed: user_id=%s, conn_id=%s, instance_id=%s, error=%v", client.UserId, client.ConnId, s.instanceID, err)
+		}
+	}
 	s.onlineConnNum.Add(-1)
 
 	if isUserOffline {
@@ -178,11 +183,16 @@ func (s *WsServer) UnregisterClient(client *Client) {
 	case s.unregisterChan <- client:
 	default:
 		log.Warn("unregister channel full: user_id=%s", client.UserId)
+		s.unregisterClient(context.Background(), client)
 	}
 }
 
 // HandleConnection handles a new WebSocket connection (Hertz handler)
 func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	if s.gate != nil && !s.gate.CanAcceptIngress() {
+		http.Error(w, errcode.ErrServerShuttingDown.Msg, http.StatusServiceUnavailable)
+		return
+	}
 	// Check connection limit
 	if s.onlineConnNum.Load() >= s.maxConnNum {
 		http.Error(w, "connection limit exceeded", http.StatusServiceUnavailable)
@@ -224,7 +234,7 @@ func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, 
 
 	// Create client
 	connId := uuid.New().String()
-	wsConn := NewWebSocketClientConn(conn, s.cfg.WebSocket.MaxMessageSize, PongWait, PingPeriod)
+	wsConn := NewWebSocketClientConn(conn, s.cfg.WebSocket.MaxMessageSize, s.cfg.WebSocket.WriteWait, s.cfg.WebSocket.PongWait, s.cfg.WebSocket.PingPeriod, s.cfg.WebSocket.WriteChannelSize)
 	client := NewClient(wsConn, claims.UserId, claims.PlatformId, sdkType, token, connId, s)
 
 	// Register client
@@ -236,18 +246,24 @@ func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, 
 
 // AsyncPushToUsers queues a message push to users
 func (s *WsServer) AsyncPushToUsers(msg *entity.Message, userIds []string, excludeConnId string) {
-	task := &PushTask{
-		Msg:       msg,
-		TargetIds: userIds,
-		ExcludeId: excludeConnId,
+	if s.gate != nil && !s.gate.CanStartSend() {
+		if msg != nil {
+			log.Warn("send path closed, message dropped: conversation_id=%s, seq=%d", msg.ConversationId, msg.Seq)
+		} else {
+			log.Warn("send path closed, message dropped")
+		}
+		return
 	}
 
+	task := &PushTask{Msg: msg, TargetIds: userIds, ExcludeId: excludeConnId}
 	select {
 	case s.pushChan <- task:
-		// Successfully queued
 	default:
-		// Queue full, log warning
-		log.Warn("push channel full, message dropped: conversation_id=%s, seq=%d", msg.ConversationId, msg.Seq)
+		if msg != nil {
+			log.Warn("push channel full, message dropped: conversation_id=%s, seq=%d", msg.ConversationId, msg.Seq)
+		} else {
+			log.Warn("push channel full, message dropped")
+		}
 	}
 }
 
@@ -259,6 +275,85 @@ func (s *WsServer) GetOnlineUserCount() int64 {
 // GetOnlineConnCount returns online connection count
 func (s *WsServer) GetOnlineConnCount() int64 {
 	return s.onlineConnNum.Load()
+}
+
+// GetAllOnlineUserIds returns all local online user IDs.
+func (s *WsServer) GetAllOnlineUserIds() []string {
+	return s.userMap.GetAllOnlineUserIds()
+}
+
+// GetAllClients returns all local clients for a user.
+func (s *WsServer) GetAllClients(userID string) ([]*Client, bool) {
+	return s.userMap.GetAll(userID)
+}
+
+// AttachPushCoordinator attaches the coordinator used by AsyncPushToUsers.
+func (s *WsServer) AttachPushCoordinator(coordinator *PushCoordinator) {
+	s.pushCoordinator = coordinator
+}
+
+// AttachRouteStore attaches the route store used for live register/unregister updates.
+func (s *WsServer) AttachRouteStore(routeStore *RouteStore, instanceID string) {
+	s.routeStore = routeStore
+	s.instanceID = instanceID
+}
+
+// SnapshotRouteConns returns local route snapshot for reconcile/runtime repair.
+func (s *WsServer) SnapshotRouteConns(instanceID string) []RouteConn {
+	return s.userMap.SnapshotRouteConns(instanceID)
+}
+
+// LocalPresenceSnapshot returns local presence data in service DTO-neutral refs.
+func (s *WsServer) LocalPresenceSnapshot(instanceID string) map[string][]service.RouteConnRef {
+	results := make(map[string][]service.RouteConnRef)
+	for _, userID := range s.userMap.GetAllOnlineUserIds() {
+		clients, ok := s.userMap.GetAll(userID)
+		if !ok {
+			continue
+		}
+		refs := make([]service.RouteConnRef, 0, len(clients))
+		for _, client := range clients {
+			refs = append(refs, service.RouteConnRef{UserId: userID, ConnId: client.ConnId, PlatformId: client.PlatformId, InstanceId: instanceID})
+		}
+		results[userID] = refs
+	}
+	return results
+}
+
+// PushToLocalClients executes local delivery for coordinator cooperation.
+func (s *WsServer) PushToLocalClients(ctx context.Context, task *PushTask, msgData *MessageData) {
+	for _, userId := range task.TargetIds {
+		clients, ok := s.userMap.GetAll(userId)
+		if !ok {
+			continue
+		}
+		for _, client := range clients {
+			if task.ExcludeId != "" && client.ConnId == task.ExcludeId {
+				continue
+			}
+			if err := client.PushMessage(ctx, msgData); err != nil {
+				log.CtxDebug(ctx, "push to client failed: user_id=%s, conn_id=%s, error=%v", userId, client.ConnId, err)
+			}
+		}
+	}
+}
+
+// PushToConnRefs executes precise local delivery to specified connection refs only.
+func (s *WsServer) PushToConnRefs(ctx context.Context, refs []ConnRef, msgData *MessageData) {
+	for _, ref := range refs {
+		clients, ok := s.userMap.GetAll(ref.UserId)
+		if !ok {
+			continue
+		}
+		for _, client := range clients {
+			if client.ConnId != ref.ConnId {
+				continue
+			}
+			if err := client.PushMessage(ctx, msgData); err != nil {
+				log.CtxDebug(ctx, "push to precise conn failed: user_id=%s, conn_id=%s, error=%v", ref.UserId, ref.ConnId, err)
+			}
+		}
+	}
 }
 
 // OnlineStatusResult represents a user's online status
@@ -378,6 +473,14 @@ func (s *WsServer) HandleSendMsg(ctx context.Context, client *Client, req *WSReq
 			File:   sendReq.Content.File,
 			Custom: sendReq.Content.Custom,
 		},
+	}
+
+	if s.gate != nil {
+		release, err := s.gate.AcquireSendLease()
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 	}
 
 	msg, err := s.msgService.SendMessage(ctx, client.UserId, svcReq)

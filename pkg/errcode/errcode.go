@@ -40,7 +40,8 @@ var (
 	ErrForbidden       = New(1004, "forbidden")
 	ErrNotFound        = New(1005, "not found")
 	ErrTooManyRequests = New(1006, "too many requests")
-	ErrNoPermission    = New(1007, "no permission to access this resource")
+	ErrNoPermission       = New(1007, "no permission to access this resource")
+	ErrServerShuttingDown = New(1008, "server shutting down")
 
 	// Auth errors (2xxx)
 	ErrTokenInvalid    = New(2001, "token invalid")

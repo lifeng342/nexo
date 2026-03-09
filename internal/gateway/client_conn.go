@@ -12,6 +12,7 @@ import (
 type ClientConn interface {
 	ReadMessage() ([]byte, error)
 	WriteMessage(data []byte) error
+	WriteControlMessage(data []byte) error
 	Close() error
 	SetReadDeadline(t time.Time) error
 	SetWriteDeadline(t time.Time) error
@@ -19,41 +20,48 @@ type ClientConn interface {
 
 // WebsocketClientConn implements ClientConn using gorilla/websocket
 type WebsocketClientConn struct {
-	conn       *websocket.Conn
-	writeChan  chan []byte
-	writeMu    sync.Mutex
-	closeOnce  sync.Once
-	closed     bool
-	closeChan  chan struct{}
-	pingPeriod time.Duration
-	pongWait   time.Duration
-	writeWait  time.Duration
-	maxMsgSize int64
+	conn        *websocket.Conn
+	writeChan   chan []byte
+	controlChan chan controlWrite
+	writeMu     sync.Mutex
+	closeOnce   sync.Once
+	closed      bool
+	closeChan   chan struct{}
+	pingPeriod  time.Duration
+	pongWait    time.Duration
+	writeWait   time.Duration
+	maxMsgSize  int64
+}
+
+ type controlWrite struct {
+	data []byte
+	ack  chan error
 }
 
 // NewWebSocketClientConn creates a new websocket client connection
-func NewWebSocketClientConn(conn *websocket.Conn, maxMsgSize int64, pongWait, pingPeriod time.Duration) *WebsocketClientConn {
+func NewWebSocketClientConn(conn *websocket.Conn, maxMsgSize int64, writeWait, pongWait, pingPeriod time.Duration, writeChannelSize int) *WebsocketClientConn {
+	if writeChannelSize <= 0 {
+		writeChannelSize = 256
+	}
 	c := &WebsocketClientConn{
-		conn:       conn,
-		writeChan:  make(chan []byte, 256), // Buffered write channel
-		closeChan:  make(chan struct{}),
-		pingPeriod: pingPeriod,
-		pongWait:   pongWait,
-		writeWait:  WriteWait,
-		maxMsgSize: maxMsgSize,
+		conn:        conn,
+		writeChan:   make(chan []byte, writeChannelSize),
+		controlChan: make(chan controlWrite),
+		closeChan:   make(chan struct{}),
+		pingPeriod:  pingPeriod,
+		pongWait:    pongWait,
+		writeWait:   writeWait,
+		maxMsgSize:  maxMsgSize,
 	}
 
-	// Set read limit
-	conn.SetReadLimit(maxMsgSize)
-
-	// Set pong handler to extend read deadline
-	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
-
-	// Start write loop
-	go c.writeLoop()
+	if conn != nil {
+		conn.SetReadLimit(maxMsgSize)
+		conn.SetPongHandler(func(string) error {
+			_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+			return nil
+		})
+		go c.writeLoop()
+	}
 
 	return c
 }
@@ -68,6 +76,15 @@ func (c *WebsocketClientConn) writeLoop() {
 
 	for {
 		select {
+		case ctrl := <-c.controlChan:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
+			err := c.conn.WriteMessage(websocket.BinaryMessage, ctrl.data)
+			ctrl.ack <- err
+			close(ctrl.ack)
+			if err != nil {
+				log.Warn("write control message error: %v", err)
+				return
+			}
 		case message, ok := <-c.writeChan:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(c.writeWait))
 			if !ok {
@@ -116,6 +133,28 @@ func (c *WebsocketClientConn) WriteMessage(data []byte) error {
 	default:
 		// Channel full, connection is slow consumer
 		return ErrWriteChannelFull
+	}
+}
+
+func (c *WebsocketClientConn) WriteControlMessage(data []byte) error {
+	c.writeMu.Lock()
+	if c.closed {
+		c.writeMu.Unlock()
+		return ErrConnClosed
+	}
+	if c.conn == nil {
+		c.writeMu.Unlock()
+		return nil
+	}
+	ack := make(chan error, 1)
+	ctrl := controlWrite{data: data, ack: ack}
+	c.writeMu.Unlock()
+
+	select {
+	case c.controlChan <- ctrl:
+		return <-ack
+	case <-c.closeChan:
+		return ErrConnClosed
 	}
 }
 

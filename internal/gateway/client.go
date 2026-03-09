@@ -185,12 +185,27 @@ func (c *Client) PushMessage(ctx context.Context, msg *MessageData) error {
 
 // KickOnline sends kick message and closes connection
 func (c *Client) KickOnline() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed.Load() {
+		return nil
+	}
+
 	resp := WSResponse{
 		ReqIdentifier: WSKickOnlineMsg,
 	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	if err := c.conn.WriteControlMessage(data); err != nil {
+		return err
+	}
 
-	_ = c.writeResponse(resp)
-	return c.Close()
+	c.closed.Store(true)
+	c.cancel()
+	return c.conn.Close()
 }
 
 // Close closes the client connection

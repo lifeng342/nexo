@@ -47,37 +47,38 @@ func (m *UserMap) Register(ctx context.Context, client *Client) {
 	userPlatform.Clients = append(userPlatform.Clients, client)
 	userPlatform.Time = time.Now()
 
-	// Update Redis online status
-	m.setOnline(ctx, client.UserId)
 }
 
 // Unregister unregisters a client
-func (m *UserMap) Unregister(ctx context.Context, client *Client) bool {
+func (m *UserMap) Unregister(ctx context.Context, client *Client) (removed bool, userOffline bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	userPlatform, exists := m.users[client.UserId]
 	if !exists {
-		return false
+		return false, false
 	}
 
-	// Remove the specific client
 	newClients := make([]*Client, 0, len(userPlatform.Clients))
+	removed = false
 	for _, c := range userPlatform.Clients {
-		if c.ConnId != client.ConnId {
-			newClients = append(newClients, c)
+		if c.ConnId == client.ConnId {
+			removed = true
+			continue
 		}
+		newClients = append(newClients, c)
+	}
+	if !removed {
+		return false, false
 	}
 	userPlatform.Clients = newClients
 
-	// If no more clients, remove user from map
 	if len(userPlatform.Clients) == 0 {
 		delete(m.users, client.UserId)
-		m.setOffline(ctx, client.UserId)
-		return true // User completely disconnected
+		return true, true
 	}
 
-	return false
+	return true, false
 }
 
 // GetAll gets all clients for a user
@@ -160,26 +161,6 @@ func (m *UserMap) IsOnline(ctx context.Context, userId string) bool {
 	return false
 }
 
-// setOnline marks user as online in Redis
-func (m *UserMap) setOnline(ctx context.Context, userId string) {
-	if m.rdb == nil {
-		return
-	}
-
-	key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-	m.rdb.Set(ctx, key, "1", 60*time.Second)
-}
-
-// setOffline marks user as offline in Redis
-func (m *UserMap) setOffline(ctx context.Context, userId string) {
-	if m.rdb == nil {
-		return
-	}
-
-	key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
-	m.rdb.Del(ctx, key)
-}
-
 // RefreshOnlineStatus refreshes the online status TTL
 func (m *UserMap) RefreshOnlineStatus(ctx context.Context, userId string) {
 	if m.rdb == nil {
@@ -190,6 +171,20 @@ func (m *UserMap) RefreshOnlineStatus(ctx context.Context, userId string) {
 		key := fmt.Sprintf(constant.RedisKeyOnline(), userId)
 		m.rdb.Expire(ctx, key, 60*time.Second)
 	}
+}
+
+// SnapshotRouteConns returns all local connections as route records for the instance.
+func (m *UserMap) SnapshotRouteConns(instanceId string) []RouteConn {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conns := make([]RouteConn, 0)
+	for userId, up := range m.users {
+		for _, client := range up.Clients {
+			conns = append(conns, RouteConn{UserId: userId, ConnId: client.ConnId, InstanceId: instanceId, PlatformId: client.PlatformId})
+		}
+	}
+	return conns
 }
 
 // GetAllOnlineUserIds returns all online user Ids (local only)

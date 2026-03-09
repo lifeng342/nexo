@@ -14,14 +14,24 @@ import (
 	"github.com/mbeoliero/nexo/internal/middleware"
 )
 
+type Readiness interface { IsReady() bool }
+
 // SetupRouter sets up all routes
-func SetupRouter(h *server.Hertz, handlers *Handlers, wsServer *gateway.WsServer) {
+func SetupRouter(h *server.Hertz, handlers *Handlers, wsServer *gateway.WsServer, readiness Readiness) {
 	// CORS middleware
 	h.Use(middleware.CORS())
 
 	// Health check
 	h.GET("/health", func(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusOK, map[string]string{"status": "ok"})
+	})
+	// Readiness check
+	h.GET("/ready", func(ctx context.Context, c *app.RequestContext) {
+		if readiness != nil && !readiness.IsReady() {
+			c.JSON(consts.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
+			return
+		}
+		c.JSON(consts.StatusOK, map[string]string{"status": "ready"})
 	})
 
 	// Auth routes (no auth required)

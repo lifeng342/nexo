@@ -11,10 +11,14 @@ import (
 )
 
 // Response represents a standard API response
+type Meta map[string]any
+
+// Response represents a standard API response
 type Response struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
+	Meta    Meta   `json:"meta,omitempty"`
 }
 
 // Success sends a success response
@@ -26,8 +30,19 @@ func Success(ctx context.Context, c *app.RequestContext, data any) {
 	})
 }
 
+// SuccessWithMeta sends a success response with meta information.
+func SuccessWithMeta(ctx context.Context, c *app.RequestContext, data any, meta Meta) {
+	c.JSON(http.StatusOK, Response{
+		Code:    0,
+		Message: "success",
+		Data:    data,
+		Meta:    meta,
+	})
+}
+
 // Error sends an error response
 func Error(ctx context.Context, c *app.RequestContext, err error) {
+	status := http.StatusOK
 	var code int
 	var msg string
 
@@ -35,9 +50,12 @@ func Error(ctx context.Context, c *app.RequestContext, err error) {
 	if errors.As(err, &e) {
 		code = e.Code
 		msg = e.Msg
+		if e == errcode.ErrServerShuttingDown {
+			status = http.StatusServiceUnavailable
+		}
 	}
 
-	c.JSON(http.StatusOK, Response{
+	c.JSON(status, Response{
 		Code:    code,
 		Message: msg,
 	})
@@ -45,7 +63,11 @@ func Error(ctx context.Context, c *app.RequestContext, err error) {
 
 // ErrorWithCode sends an error response with specific error code
 func ErrorWithCode(ctx context.Context, c *app.RequestContext, e *errcode.Error) {
-	c.JSON(http.StatusOK, Response{
+	status := http.StatusOK
+	if e == errcode.ErrServerShuttingDown {
+		status = http.StatusServiceUnavailable
+	}
+	c.JSON(status, Response{
 		Code:    e.Code,
 		Message: e.Msg,
 	})

@@ -71,16 +71,33 @@ type ExternalJWTConfig struct {
 	DefaultPlatformId int    `mapstructure:"default_platform_id"` // defaults to PlatformIdWeb(5)
 }
 
+type CrossInstanceConfig struct {
+	Enabled                     bool   `mapstructure:"enabled"`
+	InstanceID                  string `mapstructure:"instance_id"`
+	HeartbeatSecond             int    `mapstructure:"heartbeat_second"`
+	RouteTTLSeconds             int    `mapstructure:"route_ttl_seconds"`
+	InstanceAliveTTLSeconds     int    `mapstructure:"instance_alive_ttl_seconds"`
+	PublishFailThreshold        int    `mapstructure:"publish_fail_threshold"`
+	RouteSubscribeFailThreshold int    `mapstructure:"route_subscribe_fail_threshold"`
+	PresenceReadFailThreshold   int    `mapstructure:"presence_read_fail_threshold"`
+	RecoverProbeIntervalSeconds int    `mapstructure:"recover_probe_interval_seconds"`
+	DrainTimeoutSeconds         int    `mapstructure:"drain_timeout_seconds"`
+	DrainRouteableGraceSeconds  int    `mapstructure:"drain_routeable_grace_seconds"`
+	DrainKickBatchSize          int    `mapstructure:"drain_kick_batch_size"`
+	DrainKickIntervalMs         int    `mapstructure:"drain_kick_interval_ms"`
+}
+
 // WebSocketConfig holds WebSocket configuration
 type WebSocketConfig struct {
-	MaxConnNum       int64         `mapstructure:"max_conn_num"`
-	MaxMessageSize   int64         `mapstructure:"max_message_size"`
-	WriteWait        time.Duration `mapstructure:"write_wait"`
-	PongWait         time.Duration `mapstructure:"pong_wait"`
-	PingPeriod       time.Duration `mapstructure:"ping_period"`
-	PushChannelSize  int           `mapstructure:"push_channel_size"`
-	PushWorkerNum    int           `mapstructure:"push_worker_num"`
-	WriteChannelSize int           `mapstructure:"write_channel_size"`
+	MaxConnNum       int64               `mapstructure:"max_conn_num"`
+	MaxMessageSize   int64               `mapstructure:"max_message_size"`
+	WriteWait        time.Duration       `mapstructure:"write_wait"`
+	PongWait         time.Duration       `mapstructure:"pong_wait"`
+	PingPeriod       time.Duration       `mapstructure:"ping_period"`
+	PushChannelSize  int                 `mapstructure:"push_channel_size"`
+	PushWorkerNum    int                 `mapstructure:"push_worker_num"`
+	WriteChannelSize int                 `mapstructure:"write_channel_size"`
+	CrossInstance    CrossInstanceConfig `mapstructure:"cross_instance"`
 }
 
 // Global config instance
@@ -154,6 +171,39 @@ func Load(configPath string) (*Config, error) {
 	}
 	if cfg.WebSocket.WriteChannelSize == 0 {
 		cfg.WebSocket.WriteChannelSize = 256
+	}
+	if cfg.WebSocket.CrossInstance.HeartbeatSecond == 0 {
+		cfg.WebSocket.CrossInstance.HeartbeatSecond = 10
+	}
+	if cfg.WebSocket.CrossInstance.RouteTTLSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RouteTTLSeconds = 70
+	}
+	if cfg.WebSocket.CrossInstance.InstanceAliveTTLSeconds == 0 {
+		cfg.WebSocket.CrossInstance.InstanceAliveTTLSeconds = 30
+	}
+	if cfg.WebSocket.CrossInstance.PublishFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.PublishFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.RouteSubscribeFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.RouteSubscribeFailThreshold = 1
+	}
+	if cfg.WebSocket.CrossInstance.PresenceReadFailThreshold == 0 {
+		cfg.WebSocket.CrossInstance.PresenceReadFailThreshold = 3
+	}
+	if cfg.WebSocket.CrossInstance.RecoverProbeIntervalSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RecoverProbeIntervalSeconds = 5
+	}
+	if cfg.WebSocket.CrossInstance.DrainTimeoutSeconds == 0 {
+		cfg.WebSocket.CrossInstance.DrainTimeoutSeconds = 30
+	}
+	if cfg.WebSocket.CrossInstance.DrainRouteableGraceSeconds == 0 {
+		cfg.WebSocket.CrossInstance.DrainRouteableGraceSeconds = 15
+	}
+	if cfg.WebSocket.CrossInstance.DrainKickBatchSize == 0 {
+		cfg.WebSocket.CrossInstance.DrainKickBatchSize = 200
+	}
+	if cfg.WebSocket.CrossInstance.DrainKickIntervalMs == 0 {
+		cfg.WebSocket.CrossInstance.DrainKickIntervalMs = 100
 	}
 
 	GlobalConfig = &cfg
