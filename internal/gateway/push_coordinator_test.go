@@ -49,29 +49,33 @@ func (b *recordingBus) Close() error { return nil }
 func TestProcessPushTaskPushesLocalBeforePublishingRoute(t *testing.T) {
 	local := &recordingLocalPusher{}
 	bus := &recordingBus{}
-	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{routeMap: map[string][]RouteConn{"u1": {{UserId: "u1", ConnId: "c1", InstanceId: "inst-remote", PlatformId: 1}}}}, bus, local)
+	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{routeMap: map[string][]RouteConn{"u1": {{UserId: "u1", ConnId: "c1", InstanceId: "inst-remote", PlatformId: 1}}}}, bus, local, "secret")
 	msg := &entity.Message{Id: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}
 
 	coordinator.processPushTask(context.Background(), &PushTask{Msg: msg, TargetIds: []string{"u1"}})
 
 	require.Equal(t, []string{"local"}, local.calls)
 	require.Len(t, bus.envs, 1)
+	require.NotEmpty(t, bus.envs[0].Signature)
 }
 
 func TestDispatchRouteOnlyPublishesPerInstanceEnvelope(t *testing.T) {
 	bus := &recordingBus{}
-	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{routeMap: map[string][]RouteConn{"u1": {{UserId: "u1", ConnId: "c1", InstanceId: "inst-a", PlatformId: 1}, {UserId: "u1", ConnId: "c2", InstanceId: "inst-b", PlatformId: 2}}}}, bus, &recordingLocalPusher{})
+	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{routeMap: map[string][]RouteConn{"u1": {{UserId: "u1", ConnId: "c1", InstanceId: "inst-a", PlatformId: 1}, {UserId: "u1", ConnId: "c2", InstanceId: "inst-b", PlatformId: 2}}}}, bus, &recordingLocalPusher{}, "secret")
 	msg := &entity.Message{Id: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}
 
 	coordinator.dispatchRouteOnly(context.Background(), &PushTask{Msg: msg, TargetIds: []string{"u1"}}, coordinator.toPushPayload(msg))
 
 	require.Len(t, bus.envs, 2)
+	for _, env := range bus.envs {
+		require.NoError(t, env.VerifySignature("secret"))
+	}
 }
 
 func TestRouteReadFailureFallsBackToLocalOnly(t *testing.T) {
 	local := &recordingLocalPusher{}
 	bus := &recordingBus{}
-	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{err: context.DeadlineExceeded}, bus, local)
+	coordinator := NewPushCoordinator("inst-local", nil, &stubRouteStore{err: context.DeadlineExceeded}, bus, local, "secret")
 	msg := &entity.Message{Id: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}
 
 	coordinator.processPushTask(context.Background(), &PushTask{Msg: msg, TargetIds: []string{"u1"}})
@@ -82,10 +86,82 @@ func TestRouteReadFailureFallsBackToLocalOnly(t *testing.T) {
 
 func TestRemoteEnvelopeDeliversWithoutRedisLookup(t *testing.T) {
 	local := &recordingLocalPusher{}
-	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local)
-	env := &PushEnvelope{PushId: "p1", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p1", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
 
 	coordinator.OnRemoteEnvelope(context.Background(), env)
 
 	require.Equal(t, []string{"local"}, local.calls)
+}
+
+func TestRemoteEnvelopeRejectsInvalidSignature(t *testing.T) {
+	local := &recordingLocalPusher{}
+	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p1", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}, Signature: "bad"}
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Empty(t, local.calls)
+}
+
+func TestRemoteEnvelopeRejectsReplay(t *testing.T) {
+	local := &recordingLocalPusher{}
+	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p1", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Equal(t, []string{"local"}, local.calls)
+}
+
+func TestRemoteEnvelopeRejectsExpiredEnvelope(t *testing.T) {
+	local := &recordingLocalPusher{}
+	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p2", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().Add(-10 * time.Minute).UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Empty(t, local.calls)
+}
+
+func TestRemoteEnvelopeRejectsFutureEnvelope(t *testing.T) {
+	local := &recordingLocalPusher{}
+	coordinator := NewPushCoordinator("inst-local", nil, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p3", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().Add(10 * time.Minute).UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Empty(t, local.calls)
+}
+
+func TestRemoteEnvelopeStillDeliversDuringSendDrainWhileRouteable(t *testing.T) {
+	local := &recordingLocalPusher{}
+	gate := NewLifecycleGate()
+	gate.BeginSendDrain()
+	coordinator := NewPushCoordinator("inst-local", gate, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p4", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Equal(t, []string{"local"}, local.calls)
+}
+
+func TestRemoteEnvelopeRejectedAfterInstanceUnrouteable(t *testing.T) {
+	local := &recordingLocalPusher{}
+	gate := NewLifecycleGate()
+	gate.BeginSendDrain()
+	gate.MarkUnrouteable()
+	coordinator := NewPushCoordinator("inst-local", gate, nil, nil, local, "secret")
+	env := &PushEnvelope{PushId: "p5", Mode: PushModeRoute, TargetConnMap: map[string][]ConnRef{"inst-local": {{UserId: "u1", ConnId: "c1", PlatformId: 1}}}, SourceInstance: "inst-remote", SentAt: time.Now().UnixMilli(), Payload: &PushPayload{MsgId: 1, ConversationId: "c1", Seq: 1, ClientMsgId: "m1", SenderId: "u0", SendAt: time.Now().UnixMilli()}}
+	require.NoError(t, env.Sign("secret"))
+
+	coordinator.OnRemoteEnvelope(context.Background(), env)
+
+	require.Empty(t, local.calls)
 }

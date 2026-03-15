@@ -30,4 +30,9 @@ jwt:
 	require.False(t, cfg.WebSocket.CrossInstance.Enabled)
 	require.Equal(t, 10, cfg.WebSocket.CrossInstance.HeartbeatSecond)
 	require.Equal(t, 70, cfg.WebSocket.CrossInstance.RouteTTLSeconds)
+	require.Equal(t, 1000, cfg.WebSocket.CrossInstance.RouteWriteQueueSize)
+	require.Equal(t, 1, cfg.WebSocket.CrossInstance.RouteWriteWorkerNum)
+	require.Equal(t, 10, cfg.WebSocket.CrossInstance.RouteReconcileIntervalSeconds)
+	require.Equal(t, 1000, cfg.WebSocket.CrossInstance.RouteRepairIntervalMs)
+	require.Equal(t, 1000, cfg.WebSocket.CrossInstance.RouteStaleCleanupLimit)
 }

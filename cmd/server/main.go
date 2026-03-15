@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -64,10 +65,13 @@ func buildServerDependencies(cfg *config.Config, repos *repository.Repositories)
 		convService = service.NewConversationService(repos)
 		wsServer = gateway.NewWsServer(cfg, repos.Redis, msgService, convService, gate)
 		if cfg.WebSocket.CrossInstance.Enabled {
+			if cfg.WebSocket.CrossInstance.PushEnvelopeSecret == "" {
+				return nil, fmt.Errorf("cross_instance.push_envelope_secret is required when cross_instance.enabled=true")
+			}
 			routeStore = gateway.NewRouteStore(repos.Redis, time.Duration(cfg.WebSocket.CrossInstance.RouteTTLSeconds)*time.Second)
 			instanceManager = gateway.NewInstanceManager(repos.Redis, instanceID, time.Duration(cfg.WebSocket.CrossInstance.InstanceAliveTTLSeconds)*time.Second)
 			pushBus = gateway.NewRedisPushBus(repos.Redis)
-			pushCoordinator = gateway.NewPushCoordinator(instanceID, gate, routeStore, pushBus, wsServer)
+			pushCoordinator = gateway.NewPushCoordinator(instanceID, gate, routeStore, pushBus, wsServer, cfg.WebSocket.CrossInstance.PushEnvelopeSecret)
 			wsServer.AttachPushCoordinator(pushCoordinator)
 			wsServer.AttachRouteStore(routeStore, instanceID)
 			msgService.SetPusher(wsServer)
@@ -134,6 +138,24 @@ func waitForSendDrain(runtimeCtx context.Context, gate gateway.LifecycleGate) {
 	}
 }
 
+func waitForPushDrain(runtimeCtx context.Context, wsServer *gateway.WsServer) {
+	if wsServer == nil {
+		return
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if wsServer.GetPendingPushCount() == 0 {
+			return
+		}
+		select {
+		case <-runtimeCtx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 func runServerShutdown(runtimeCtx context.Context, runtimeCancel context.CancelFunc, h *server.Hertz, deps *serverDependencies, cfg *config.Config, forceUnrouteable bool) {
 	log.CtxInfo(runtimeCtx, "shutting down server...")
 	deps.Gate.MarkUnready()
@@ -156,6 +178,7 @@ func runServerShutdown(runtimeCtx context.Context, runtimeCancel context.CancelF
 	}
 
 	waitForSendDrain(httpShutdownCtx, deps.Gate)
+	waitForPushDrain(httpShutdownCtx, deps.WsServer)
 	deps.Gate.CloseSendPath()
 	if deps.Gate.Snapshot().InflightSend > 0 {
 		deps.Gate.ForceCloseSendPath()
@@ -169,6 +192,19 @@ func runServerShutdown(runtimeCtx context.Context, runtimeCancel context.CancelF
 			<-graceCtx.Done()
 		}
 		deps.Gate.MarkUnrouteable()
+		if deps.InstanceManager != nil {
+			if err := deps.InstanceManager.UpdateState(runtimeCtx, deps.InstanceManager.SnapshotState(deps.Gate)); err != nil {
+				log.CtxWarn(runtimeCtx, "failed to publish unrouteable state during shutdown: instance_id=%s, error=%v", deps.InstanceID, err)
+			}
+		}
+	}
+	if deps.WsServer != nil {
+		deps.WsServer.DrainLocalClients(runtimeCtx, gateway.DrainLocalClientsOptions{
+			BatchSize:     cfg.WebSocket.CrossInstance.DrainKickBatchSize,
+			BatchInterval: time.Duration(cfg.WebSocket.CrossInstance.DrainKickIntervalMs) * time.Millisecond,
+			DrainTimeout:  time.Duration(cfg.WebSocket.CrossInstance.DrainTimeoutSeconds) * time.Second,
+			SettleTimeout: 10 * time.Millisecond,
+		})
 	}
 	if deps.InstanceManager != nil {
 		if err := deps.InstanceManager.UpdateState(runtimeCtx, deps.InstanceManager.SnapshotState(deps.Gate)); err != nil {
@@ -223,22 +259,6 @@ func main() {
 			log.CtxWarn(runtimeCtx, "failed to publish initial instance state: instance_id=%s, error=%v", deps.InstanceID, err)
 		}
 	}
-	if deps.RouteStore != nil && deps.WsServer != nil {
-		go func() {
-			ticker := time.NewTicker(time.Duration(cfg.WebSocket.CrossInstance.HeartbeatSecond) * time.Second)
-			defer ticker.Stop()
-			for {
-				if err := deps.RouteStore.ReconcileInstanceRoutes(runtimeCtx, deps.InstanceID, deps.WsServerSnapshotRouteConns()); err != nil {
-					log.CtxWarn(runtimeCtx, "route reconcile failed: instance_id=%s, error=%v", deps.InstanceID, err)
-				}
-				select {
-				case <-runtimeCtx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
-	}
 	deps.WsServer.Run(runtimeCtx)
 	log.CtxInfo(runtimeCtx, "websocket server started")
 
@@ -247,15 +267,27 @@ func main() {
 	log.CtxInfo(runtimeCtx, "server starting on port %d", cfg.Server.HTTPPort)
 	go func() { h.Spin() }()
 
+	var shutdownOnce sync.Once
+	shutdownDone := make(chan struct{})
+	triggerShutdown := func(forceUnrouteable bool) {
+		shutdownOnce.Do(func() {
+			defer close(shutdownDone)
+			runServerShutdown(runtimeCtx, runtimeCancel, h, deps, cfg, forceUnrouteable)
+		})
+	}
 	if deps.PushBus != nil && deps.PushCoordinator != nil {
 		if err := deps.PushBus.SubscribeInstance(runtimeCtx, deps.InstanceID, deps.PushCoordinator.OnRemoteEnvelope, func(error) {
-			go runServerShutdown(runtimeCtx, runtimeCancel, h, deps, cfg, true)
+			go triggerShutdown(true)
 		}); err != nil {
 			log.CtxError(runtimeCtx, "failed to subscribe push bus: %v", err)
 			panic(err)
 		}
 	}
 
-	<-signalCtx.Done()
-	runServerShutdown(runtimeCtx, runtimeCancel, h, deps, cfg, false)
+	select {
+	case <-signalCtx.Done():
+		triggerShutdown(false)
+		<-shutdownDone
+	case <-shutdownDone:
+	}
 }

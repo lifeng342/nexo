@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"errors"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mbeoliero/kit/log"
@@ -18,16 +20,25 @@ type localPushExecutor interface {
 	PushToConnRefs(ctx context.Context, refs []ConnRef, msgData *MessageData)
 }
 
+type seenPush struct {
+	pushID string
+	sentAt int64
+}
+
 type PushCoordinator struct {
 	instanceID string
 	gate       LifecycleGate
 	routeStore routeReader
 	pushBus    PushBus
 	local      localPushExecutor
+	secret     string
+	seenMu     sync.Mutex
+	seenPushes map[string]int64
+	seenQueue  []seenPush
 }
 
-func NewPushCoordinator(instanceID string, gate LifecycleGate, routeStore routeReader, pushBus PushBus, local localPushExecutor) *PushCoordinator {
-	return &PushCoordinator{instanceID: instanceID, gate: gate, routeStore: routeStore, pushBus: pushBus, local: local}
+func NewPushCoordinator(instanceID string, gate LifecycleGate, routeStore routeReader, pushBus PushBus, local localPushExecutor, secret string) *PushCoordinator {
+	return &PushCoordinator{instanceID: instanceID, gate: gate, routeStore: routeStore, pushBus: pushBus, local: local, secret: secret, seenPushes: make(map[string]int64), seenQueue: make([]seenPush, 0)}
 }
 
 func (c *PushCoordinator) AsyncPushToUsers(msg *entity.Message, userIDs []string, excludeConnID string) {
@@ -74,14 +85,19 @@ func (c *PushCoordinator) dispatchRouteOnly(ctx context.Context, task *PushTask,
 		}
 	}
 	for instID, refs := range grouped {
-		err := c.pushBus.PublishToInstance(ctx, instID, &PushEnvelope{
+		env := &PushEnvelope{
 			PushId:         uuid.New().String(),
 			Mode:           PushModeRoute,
 			TargetConnMap:  map[string][]ConnRef{instID: refs},
 			SourceInstance: c.instanceID,
 			SentAt:         nowMillis(),
 			Payload:        payload,
-		})
+		}
+		if err := env.Sign(c.secret); err != nil {
+			log.CtxWarn(ctx, "sign route envelope failed: source_instance=%s, target_instance=%s, error=%v", c.instanceID, instID, err)
+			continue
+		}
+		err := c.pushBus.PublishToInstance(ctx, instID, env)
 		if err != nil {
 			log.CtxWarn(ctx, "publish route envelope failed: source_instance=%s, target_instance=%s, error=%v", c.instanceID, instID, err)
 		}
@@ -92,9 +108,50 @@ func (c *PushCoordinator) OnRemoteEnvelope(ctx context.Context, env *PushEnvelop
 	if c.local == nil || env == nil || env.Payload == nil {
 		return
 	}
+	if c.gate != nil && !c.gate.IsRouteable() {
+		return
+	}
+	if err := env.VerifySignature(c.secret); err != nil {
+		log.CtxWarn(ctx, "reject invalid push envelope: source_instance=%s, error=%v", env.SourceInstance, err)
+		return
+	}
+	if !c.acceptRemoteEnvelope(env) {
+		return
+	}
 	msgData := c.toMessageData(env.Payload)
 	refs := env.TargetConnMap[c.instanceID]
 	c.local.PushToConnRefs(ctx, refs, msgData)
+}
+
+func (c *PushCoordinator) acceptRemoteEnvelope(env *PushEnvelope) bool {
+	if env == nil {
+		return false
+	}
+	maxAgeMs := int64((2 * time.Minute).Milliseconds())
+	maxFutureSkewMs := int64((30 * time.Second).Milliseconds())
+	now := nowMillis()
+	if env.SentAt <= 0 || now-env.SentAt > maxAgeMs || env.SentAt-now > maxFutureSkewMs {
+		return false
+	}
+	if env.PushId == "" {
+		return false
+	}
+	c.seenMu.Lock()
+	defer c.seenMu.Unlock()
+	for len(c.seenQueue) > 0 {
+		head := c.seenQueue[0]
+		if now-head.sentAt <= maxAgeMs {
+			break
+		}
+		delete(c.seenPushes, head.pushID)
+		c.seenQueue = c.seenQueue[1:]
+	}
+	if _, exists := c.seenPushes[env.PushId]; exists {
+		return false
+	}
+	c.seenPushes[env.PushId] = env.SentAt
+	c.seenQueue = append(c.seenQueue, seenPush{pushID: env.PushId, sentAt: env.SentAt})
+	return true
 }
 
 func (c *PushCoordinator) toPushPayload(msg *entity.Message) *PushPayload {

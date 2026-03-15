@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ func newTestRepositoriesForWiring(t *testing.T) *repository.Repositories {
 func TestBuildServerDependenciesEnablesCrossInstanceWiring(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.WebSocket.CrossInstance.Enabled = true
+	cfg.WebSocket.CrossInstance.PushEnvelopeSecret = "secret"
 	cfg.Server.HTTPPort = 8080
 	repos := newTestRepositoriesForWiring(t)
 	deps, err := buildServerDependencies(cfg, repos)
@@ -51,6 +53,15 @@ func TestBuildServerDependenciesEnablesCrossInstanceWiring(t *testing.T) {
 	require.NotNil(t, deps.InstanceManager)
 	require.NotNil(t, deps.PushBus)
 	require.NotNil(t, deps.PushCoordinator)
+}
+
+func TestBuildServerDependenciesRequiresPushEnvelopeSecretWhenCrossInstanceEnabled(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.WebSocket.CrossInstance.Enabled = true
+	cfg.Server.HTTPPort = 8080
+	repos := newTestRepositoriesForWiring(t)
+	_, err := buildServerDependencies(cfg, repos)
+	require.Error(t, err)
 }
 
 func TestWaitForSendDrainIgnoresSeparateSignalContextCancellation(t *testing.T) {
@@ -82,4 +93,46 @@ func TestWaitForSendDrainIgnoresSeparateSignalContextCancellation(t *testing.T) 
 		t.Fatal("waitForSendDrain did not finish after release")
 	}
 
+}
+
+func TestWaitForPushDrainBlocksUntilPendingPushesFinish(t *testing.T) {
+	server := &gateway.WsServer{}
+	server.MarkPushInFlightForTest(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		waitForPushDrain(ctx, server)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("waitForPushDrain returned before pushes drained")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	server.MarkPushInFlightForTest(-1)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("waitForPushDrain did not finish after drain")
+	}
+}
+
+func TestTriggerShutdownSignalsCompletionWithoutSignal(t *testing.T) {
+	shutdownDone := make(chan struct{})
+	var shutdownOnce sync.Once
+	triggerShutdown := func(fn func()) {
+		shutdownOnce.Do(func() {
+			defer close(shutdownDone)
+			fn()
+		})
+	}
+	triggerShutdown(func() {})
+	select {
+	case <-shutdownDone:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not signal completion")
+	}
 }

@@ -72,19 +72,25 @@ type ExternalJWTConfig struct {
 }
 
 type CrossInstanceConfig struct {
-	Enabled                     bool   `mapstructure:"enabled"`
-	InstanceID                  string `mapstructure:"instance_id"`
-	HeartbeatSecond             int    `mapstructure:"heartbeat_second"`
-	RouteTTLSeconds             int    `mapstructure:"route_ttl_seconds"`
-	InstanceAliveTTLSeconds     int    `mapstructure:"instance_alive_ttl_seconds"`
-	PublishFailThreshold        int    `mapstructure:"publish_fail_threshold"`
-	RouteSubscribeFailThreshold int    `mapstructure:"route_subscribe_fail_threshold"`
-	PresenceReadFailThreshold   int    `mapstructure:"presence_read_fail_threshold"`
-	RecoverProbeIntervalSeconds int    `mapstructure:"recover_probe_interval_seconds"`
-	DrainTimeoutSeconds         int    `mapstructure:"drain_timeout_seconds"`
-	DrainRouteableGraceSeconds  int    `mapstructure:"drain_routeable_grace_seconds"`
-	DrainKickBatchSize          int    `mapstructure:"drain_kick_batch_size"`
-	DrainKickIntervalMs         int    `mapstructure:"drain_kick_interval_ms"`
+	Enabled                       bool   `mapstructure:"enabled"`
+	InstanceID                    string `mapstructure:"instance_id"`
+	HeartbeatSecond               int    `mapstructure:"heartbeat_second"`
+	RouteTTLSeconds               int    `mapstructure:"route_ttl_seconds"`
+	InstanceAliveTTLSeconds       int    `mapstructure:"instance_alive_ttl_seconds"`
+	PublishFailThreshold          int    `mapstructure:"publish_fail_threshold"`
+	RouteSubscribeFailThreshold   int    `mapstructure:"route_subscribe_fail_threshold"`
+	PresenceReadFailThreshold     int    `mapstructure:"presence_read_fail_threshold"`
+	RecoverProbeIntervalSeconds   int    `mapstructure:"recover_probe_interval_seconds"`
+	DrainTimeoutSeconds           int    `mapstructure:"drain_timeout_seconds"`
+	DrainRouteableGraceSeconds    int    `mapstructure:"drain_routeable_grace_seconds"`
+	DrainKickBatchSize            int    `mapstructure:"drain_kick_batch_size"`
+	DrainKickIntervalMs           int    `mapstructure:"drain_kick_interval_ms"`
+	RouteWriteQueueSize           int    `mapstructure:"route_write_queue_size"`
+	RouteWriteWorkerNum           int    `mapstructure:"route_write_worker_num"`
+	RouteReconcileIntervalSeconds int    `mapstructure:"route_reconcile_interval_seconds"`
+	RouteRepairIntervalMs         int    `mapstructure:"route_repair_interval_ms"`
+	RouteStaleCleanupLimit        int    `mapstructure:"route_stale_cleanup_limit"`
+	PushEnvelopeSecret            string `mapstructure:"push_envelope_secret"`
 }
 
 // WebSocketConfig holds WebSocket configuration
@@ -204,6 +210,21 @@ func Load(configPath string) (*Config, error) {
 	}
 	if cfg.WebSocket.CrossInstance.DrainKickIntervalMs == 0 {
 		cfg.WebSocket.CrossInstance.DrainKickIntervalMs = 100
+	}
+	if cfg.WebSocket.CrossInstance.RouteWriteQueueSize == 0 {
+		cfg.WebSocket.CrossInstance.RouteWriteQueueSize = 1000
+	}
+	if cfg.WebSocket.CrossInstance.RouteWriteWorkerNum == 0 {
+		cfg.WebSocket.CrossInstance.RouteWriteWorkerNum = 1
+	}
+	if cfg.WebSocket.CrossInstance.RouteReconcileIntervalSeconds == 0 {
+		cfg.WebSocket.CrossInstance.RouteReconcileIntervalSeconds = 10
+	}
+	if cfg.WebSocket.CrossInstance.RouteRepairIntervalMs == 0 {
+		cfg.WebSocket.CrossInstance.RouteRepairIntervalMs = 1000
+	}
+	if cfg.WebSocket.CrossInstance.RouteStaleCleanupLimit == 0 {
+		cfg.WebSocket.CrossInstance.RouteStaleCleanupLimit = 1000
 	}
 
 	GlobalConfig = &cfg

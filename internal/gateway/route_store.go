@@ -96,7 +96,7 @@ func (s *RouteStore) getUsersConnRefs(ctx context.Context, userIDs []string, req
 	return result, nil
 }
 
-func (s *RouteStore) ReconcileInstanceRoutes(ctx context.Context, instanceID string, conns []RouteConn) error {
+func (s *RouteStore) ReconcileInstanceRoutes(ctx context.Context, instanceID string, conns []RouteConn, staleCleanupLimit int) error {
 	expected := make(map[string]RouteConn, len(conns))
 	for _, conn := range conns {
 		expected[routeInstMember(conn.UserId, conn.ConnId)] = conn
@@ -109,9 +109,13 @@ func (s *RouteStore) ReconcileInstanceRoutes(ctx context.Context, instanceID str
 	if err != nil {
 		return err
 	}
+	cleaned := 0
 	for _, member := range members {
 		if _, ok := expected[member]; ok {
 			continue
+		}
+		if staleCleanupLimit > 0 && cleaned >= staleCleanupLimit {
+			break
 		}
 		parts := strings.SplitN(member, "|", 2)
 		if len(parts) != 2 {
@@ -121,6 +125,7 @@ func (s *RouteStore) ReconcileInstanceRoutes(ctx context.Context, instanceID str
 		if err := s.UnregisterConn(ctx, stale); err != nil {
 			return err
 		}
+		cleaned++
 	}
 	return nil
 }

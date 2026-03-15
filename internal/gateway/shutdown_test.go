@@ -69,3 +69,55 @@ func TestWaitForSendDrainClosesAfterInflightCompletes(t *testing.T) {
 		t.Fatal("waitForSendDrain did not finish")
 	}
 }
+
+func TestDrainLocalClientsKicksInBatchesAndWaitsForZero(t *testing.T) {
+	server := newDrainTestServer(3)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result := server.DrainLocalClients(ctx, DrainLocalClientsOptions{BatchSize: 2, BatchInterval: time.Millisecond, SettleTimeout: 5 * time.Millisecond})
+
+	require.Equal(t, int64(0), server.GetOnlineConnCount())
+	require.Equal(t, 3, result.KickAttempts)
+	require.Equal(t, 0, result.FallbackCloses)
+	require.Equal(t, 0, result.Survivors)
+}
+
+func TestDrainLocalClientsForceClosesSurvivorsAfterTimeout(t *testing.T) {
+	server := newDrainTestServer(2)
+	server.SetDrainUnregisterOnKick(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result := server.DrainLocalClients(ctx, DrainLocalClientsOptions{BatchSize: 1, BatchInterval: time.Millisecond, DrainTimeout: 5 * time.Millisecond, SettleTimeout: 5 * time.Millisecond})
+
+	require.Equal(t, 2, result.KickAttempts)
+	require.GreaterOrEqual(t, result.FallbackCloses, 2)
+	require.Equal(t, int64(0), server.GetOnlineConnCount())
+}
+
+func TestDrainLocalClientsStillForceClosesOnContextDone(t *testing.T) {
+	server := newDrainTestServer(2)
+	server.SetDrainUnregisterOnKick(false)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := server.DrainLocalClients(ctx, DrainLocalClientsOptions{BatchSize: 1, BatchInterval: time.Second, DrainTimeout: time.Second})
+
+	require.GreaterOrEqual(t, result.FallbackCloses, 2)
+	require.Equal(t, int64(0), server.GetOnlineConnCount())
+}
+
+func TestDrainLocalClientsCatchesLateRegisteredClient(t *testing.T) {
+	server := newDrainTestServer(1)
+	lateClient := NewClient(&drainTestConn{}, "u2", 2, "", "", "late", server)
+	server.registerChan = make(chan *Client, 1)
+	server.registerChan <- lateClient
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result := server.DrainLocalClients(ctx, DrainLocalClientsOptions{BatchSize: 1, BatchInterval: time.Millisecond, DrainTimeout: 5 * time.Millisecond, SettleTimeout: 5 * time.Millisecond})
+
+	require.GreaterOrEqual(t, result.KickAttempts, 2)
+	require.Equal(t, int64(0), server.GetOnlineConnCount())
+}

@@ -1,6 +1,13 @@
 package gateway
 
-import "time"
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"time"
+)
 
 type PushMode string
 
@@ -44,6 +51,43 @@ type PushEnvelope struct {
 	SourceInstance string               `json:"source_instance"`
 	SentAt         int64                `json:"sent_at"`
 	Payload        *PushPayload         `json:"payload"`
+	Signature      string               `json:"signature,omitempty"`
+}
+
+var ErrInvalidPushEnvelopeSignature = errors.New("invalid push envelope signature")
+
+func (e *PushEnvelope) signaturePayload() ([]byte, error) {
+	copyEnv := *e
+	copyEnv.Signature = ""
+	return json.Marshal(copyEnv)
+}
+
+func (e *PushEnvelope) Sign(secret string) error {
+	payload, err := e.signaturePayload()
+	if err != nil {
+		return err
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(payload)
+	e.Signature = hex.EncodeToString(mac.Sum(nil))
+	return nil
+}
+
+func (e *PushEnvelope) VerifySignature(secret string) error {
+	if e == nil || secret == "" || e.Signature == "" {
+		return ErrInvalidPushEnvelopeSignature
+	}
+	payload, err := e.signaturePayload()
+	if err != nil {
+		return err
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(payload)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(e.Signature)) {
+		return ErrInvalidPushEnvelopeSignature
+	}
+	return nil
 }
 
 func nowMillis() int64 { return time.Now().UnixMilli() }

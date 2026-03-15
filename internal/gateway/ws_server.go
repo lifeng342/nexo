@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -35,6 +37,12 @@ type WsServer struct {
 	routeStore       *RouteStore
 	instanceID       string
 	pushCoordinator  *PushCoordinator
+	routeWriteChan   chan routeWriteEvent
+	routeStateMu     sync.Mutex
+	routeConnState   map[routeConnKey]routeConnState
+	routeRecorder    *routeRuntimeRecorder
+	drainAutoUnregisterOnKick bool
+	pendingPushes    atomic.Int64
 	onlineUserNum    atomic.Int64
 	onlineConnNum    atomic.Int64
 	maxConnNum       int64
@@ -45,6 +53,53 @@ type PushTask struct {
 	Msg       *entity.Message
 	TargetIds []string
 	ExcludeId string // Exclude specific connection Id
+}
+
+type routeDesiredState int
+
+const (
+	routeDesiredRegistered routeDesiredState = iota + 1
+	routeDesiredUnregistered
+)
+
+type routeConnKey struct {
+	UserID string
+	ConnID string
+}
+
+type routeConnDescriptor struct {
+	UserID     string
+	ConnID     string
+	PlatformID int
+	InstanceID string
+}
+
+type routeConnState struct {
+	Descriptor routeConnDescriptor
+	Desired    routeDesiredState
+}
+
+type routeWriteEvent struct {
+	Descriptor routeConnDescriptor
+	Desired    routeDesiredState
+}
+
+type routeRuntimeRecorder struct {
+	events []string
+}
+
+type DrainLocalClientsOptions struct {
+	BatchSize     int
+	BatchInterval time.Duration
+	DrainTimeout  time.Duration
+	SettleTimeout time.Duration
+}
+
+type DrainLocalClientsResult struct {
+	KickAttempts   int
+	KickFailures   int
+	FallbackCloses int
+	Survivors      int
 }
 
 // NewWsServer creates a new WebSocket server
@@ -81,22 +136,33 @@ func NewWsServer(cfg *config.Config, rdb *redis.Client, msgService *service.Mess
 		convService:    convService,
 		gate:           gate,
 		maxConnNum:     cfg.WebSocket.MaxConnNum,
+		routeConnState: make(map[routeConnKey]routeConnState),
+		drainAutoUnregisterOnKick: true,
 	}
-
+	server.initRouteRuntime()
 	return server
 }
 
 // Run starts the WebSocket server
 func (s *WsServer) Run(ctx context.Context) {
-	// Start event loop
 	go s.eventLoop(ctx)
-	// Start push workers
 	workerNum := s.cfg.WebSocket.PushWorkerNum
 	if workerNum <= 0 {
 		workerNum = 10
 	}
 	for i := 0; i < workerNum; i++ {
 		go s.pushLoop(ctx)
+	}
+	if s.routeStore != nil && s.instanceID != "" && s.cfg != nil && s.cfg.WebSocket.CrossInstance.Enabled {
+		routeWorkers := s.cfg.WebSocket.CrossInstance.RouteWriteWorkerNum
+		if routeWorkers <= 0 {
+			routeWorkers = 1
+		}
+		for i := 0; i < routeWorkers; i++ {
+			go s.routeWriteLoop(ctx)
+		}
+		go s.routeReconcileLoop(ctx)
+		go s.routeRepairLoop(ctx)
 	}
 	log.Info("started %d push workers", workerNum)
 }
@@ -129,6 +195,7 @@ func (s *WsServer) pushLoop(ctx context.Context) {
 
 // processPushTask processes a single push task
 func (s *WsServer) processPushTask(ctx context.Context, task *PushTask) {
+	defer s.pendingPushes.Add(-1)
 	if s.pushCoordinator != nil {
 		s.pushCoordinator.processPushTask(ctx, task)
 		return
@@ -145,12 +212,10 @@ func (s *WsServer) registerClient(ctx context.Context, client *Client) {
 	}
 
 	s.userMap.Register(ctx, client)
-	if s.routeStore != nil && s.instanceID != "" {
-		if err := s.routeStore.RegisterConn(ctx, RouteConn{UserId: client.UserId, ConnId: client.ConnId, InstanceId: s.instanceID, PlatformId: client.PlatformId}); err != nil {
-			log.CtxWarn(ctx, "route register failed: user_id=%s, conn_id=%s, instance_id=%s, error=%v", client.UserId, client.ConnId, s.instanceID, err)
-		}
-	}
 	s.onlineConnNum.Add(1)
+	if s.instanceID != "" {
+		s.enqueueRouteWrite(routeConnDescriptorFromClient(client, s.instanceID), routeDesiredRegistered)
+	}
 
 	log.CtxInfo(ctx, "client registered: user_id=%s, platform_id=%d, conn_id=%s, existing_conns=%d, online_users=%d, online_conns=%d",
 		client.UserId, client.PlatformId, client.ConnId, len(existingClients), s.onlineUserNum.Load(), s.onlineConnNum.Load())
@@ -162,12 +227,10 @@ func (s *WsServer) unregisterClient(ctx context.Context, client *Client) {
 	if !removed {
 		return
 	}
-	if s.routeStore != nil && s.instanceID != "" {
-		if err := s.routeStore.UnregisterConn(ctx, RouteConn{UserId: client.UserId, ConnId: client.ConnId, InstanceId: s.instanceID, PlatformId: client.PlatformId}); err != nil {
-			log.CtxWarn(ctx, "route unregister failed: user_id=%s, conn_id=%s, instance_id=%s, error=%v", client.UserId, client.ConnId, s.instanceID, err)
-		}
-	}
 	s.onlineConnNum.Add(-1)
+	if s.instanceID != "" {
+		s.enqueueRouteWrite(routeConnDescriptorFromClient(client, s.instanceID), routeDesiredUnregistered)
+	}
 
 	if isUserOffline {
 		s.onlineUserNum.Add(-1)
@@ -218,12 +281,12 @@ func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 
-	// Allow query param to override platform ID from claims
-	if platformIdStr != "" {
-		if pid, parseErr := strconv.Atoi(platformIdStr); parseErr == nil {
-			claims.PlatformId = pid
-		}
+	resolvedPlatformID, err := resolvePlatformID(claims.PlatformId, platformIdStr)
+	if err != nil {
+		http.Error(w, "invalid platform_id", http.StatusBadRequest)
+		return
 	}
+	claims.PlatformId = resolvedPlatformID
 
 	// Upgrade connection
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -237,14 +300,32 @@ func (s *WsServer) HandleConnection(ctx context.Context, w http.ResponseWriter, 
 	wsConn := NewWebSocketClientConn(conn, s.cfg.WebSocket.MaxMessageSize, s.cfg.WebSocket.WriteWait, s.cfg.WebSocket.PongWait, s.cfg.WebSocket.PingPeriod, s.cfg.WebSocket.WriteChannelSize)
 	client := NewClient(wsConn, claims.UserId, claims.PlatformId, sdkType, token, connId, s)
 
-	// Register client
-	s.registerChan <- client
-
-	// Start client
+	if s.gate != nil && !s.gate.CanAcceptIngress() {
+		_ = conn.Close()
+		return
+	}
+	if err := s.tryEnqueueRegister(ctx, client); err != nil {
+		_ = client.Close()
+		return
+	}
 	client.Start()
 }
 
 // AsyncPushToUsers queues a message push to users
+func resolvePlatformID(claimPlatformID int, platformIDStr string) (int, error) {
+	if platformIDStr == "" {
+		return claimPlatformID, nil
+	}
+	pid, err := strconv.Atoi(platformIDStr)
+	if err != nil {
+		return 0, err
+	}
+	if pid != claimPlatformID {
+		return 0, errcode.ErrInvalidParam
+	}
+	return pid, nil
+}
+
 func (s *WsServer) AsyncPushToUsers(msg *entity.Message, userIds []string, excludeConnId string) {
 	if s.gate != nil && !s.gate.CanStartSend() {
 		if msg != nil {
@@ -256,9 +337,11 @@ func (s *WsServer) AsyncPushToUsers(msg *entity.Message, userIds []string, exclu
 	}
 
 	task := &PushTask{Msg: msg, TargetIds: userIds, ExcludeId: excludeConnId}
+	s.pendingPushes.Add(1)
 	select {
 	case s.pushChan <- task:
 	default:
+		s.pendingPushes.Add(-1)
 		if msg != nil {
 			log.Warn("push channel full, message dropped: conversation_id=%s, seq=%d", msg.ConversationId, msg.Seq)
 		} else {
@@ -275,6 +358,17 @@ func (s *WsServer) GetOnlineUserCount() int64 {
 // GetOnlineConnCount returns online connection count
 func (s *WsServer) GetOnlineConnCount() int64 {
 	return s.onlineConnNum.Load()
+}
+
+func (s *WsServer) GetPendingPushCount() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.pendingPushes.Load()
+}
+
+func (s *WsServer) MarkPushInFlightForTest(delta int64) {
+	s.pendingPushes.Add(delta)
 }
 
 // GetAllOnlineUserIds returns all local online user IDs.
