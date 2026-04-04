@@ -3,12 +3,14 @@ module github.com/mbeoliero/nexo
 go 1.25.5
 
 require (
-	github.com/mbeoliero/nexo/common v0.0.0
+	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/bytedance/sonic v1.14.2
 	github.com/cloudwego/hertz v0.10.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/mbeoliero/kit v0.0.0-20260124081345-327b8689d86b
+	github.com/mbeoliero/nexo/common v0.0.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/sony/sonyflake v1.3.0
 	github.com/spf13/viper v1.18.2
@@ -21,7 +23,6 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic v1.14.2 // indirect
 	github.com/bytedance/sonic/loader v0.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
@@ -58,6 +59,7 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
